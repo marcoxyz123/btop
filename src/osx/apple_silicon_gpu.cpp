@@ -1028,12 +1028,14 @@ namespace Gpu {
 					if (do_debug) Logger::debug("AppleSiliconGpu: GPU Energy channel: value={} unit='{}'", energy_value, unit);
 				}
 
-				//? ANE power from "ANE" subgroup channels
-				if (subgroup == "ANE" or channel_name == "ANE" or
+				//? ANE power from channels starting with "ANE"
+				//? Channel naming varies by chip: "ANE" (Basic), "ANE0" (Max), "ANE0_0"/"ANE0_1" (Ultra)
+				if (subgroup == "ANE" or
+				    channel_name.rfind("ANE", 0) == 0 or  // starts_with("ANE")
 				    channel_name.find("ANE Energy") != std::string::npos) {
 					found_ane_energy = true;
 					ane_energy_joules += to_joules(energy_value);
-					if (do_debug) Logger::debug("AppleSiliconGpu: ANE Energy channel: value={} unit='{}'", energy_value, unit);
+					if (do_debug) Logger::debug("AppleSiliconGpu: ANE Energy channel '{}': value={} unit='{}'", channel_name, energy_value, unit);
 				}
 
 				//? CPU power from CPU core channels (EACC_CPU*, PACC0_CPU*, etc.)
