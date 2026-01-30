@@ -36,6 +36,7 @@ tab-size = 4
 #include "mbtop_log.hpp"
 #include "mbtop_menu.hpp"
 #include "mbtop_shared.hpp"
+#include "mbtop_socket.hpp"
 #include "mbtop_theme.hpp"
 #include "mbtop_tools.hpp"
 
@@ -3309,6 +3310,8 @@ namespace Proc {
 	string selected_name;
 	string selected_cmd;
 	bool filter_tagged = false;  //? When true, show only tagged processes
+	bool mcp_error_shown = false;  //? Track if MCP error modal was shown
+	bool mcp_error_modal_active = false;  //? Track if modal is waiting for key
 	std::unordered_map<size_t, Draw::Graph> p_graphs;
 	std::unordered_map<size_t, Draw::Graph> p_gpu_graphs;
 	std::unordered_map<size_t, bool> p_wide_cmd;
@@ -4731,6 +4734,51 @@ namespace Proc {
 			out += Logs::draw_config_modal();
 		}
 
+		//? Show one-time MCP error modal if socket is in use by another instance
+		if (Socket::mcp_unavailable.load() and not mcp_error_shown) {
+			mcp_error_shown = true;  //? Only show once per session
+
+			//? Calculate modal size based on message
+			vector<string> lines;
+			string line;
+			for (char c : Socket::mcp_error_message) {
+				if (c == '\n') {
+					lines.push_back(line);
+					line.clear();
+				} else {
+					line += c;
+				}
+			}
+			if (not line.empty()) lines.push_back(line);
+
+			int max_line_len = 10;
+			for (const auto& l : lines) {
+				max_line_len = std::max(max_line_len, static_cast<int>(l.length()));
+			}
+
+			const int modal_w = std::min(width - 4, max_line_len + 6);
+			const int modal_h = static_cast<int>(lines.size()) + 5;
+			const int modal_x = x + (width - modal_w) / 2;
+			const int modal_y = y + (height - modal_h) / 2;
+
+			//? Draw modal box with warning styling
+			out += Draw::createBox(modal_x, modal_y, modal_w, modal_h, Theme::c("log_error"), true, "MCP Unavailable");
+
+			//? Draw message lines
+			int line_y = modal_y + 2;
+			for (const auto& l : lines) {
+				out += Mv::to(line_y++, modal_x + 3);
+				out += Theme::c("main_fg") + l;
+			}
+
+			//? Instructions
+			out += Mv::to(modal_y + modal_h - 2, modal_x + (modal_w - 18) / 2);
+			out += Theme::c("inactive_fg") + "Press any key to continue";
+
+			//? Set flag to capture next key
+			mcp_error_modal_active = true;
+		}
+
 		redraw = false;
 		return out + Fx::reset;
 	}
@@ -4778,7 +4826,7 @@ namespace Logs {
 	bool config_modal_tagged = false;
 	int config_modal_color_idx = 3;   //? Default to green (index 3)
 	int config_modal_field = 0;       //? 0=command, 1=display, 2=path, 3=tagged, 4=color, 5=buttons
-	int config_modal_button = 0;      //? 0=Save, 1=Remove, 2=Cancel
+	int config_modal_button = 0;      //? 0=Save, 1=Remove, 2=Cancel, 3=Clear All
 
 	//=== Color Picker Modal State ===
 	bool color_modal_active = false;
@@ -5117,7 +5165,7 @@ namespace Logs {
 		//? Mouse click on button - select and activate
 		if (key.starts_with("config_btn_")) {
 			int btn_idx = key.back() - '0';
-			if (btn_idx >= 0 && btn_idx <= 2) {
+			if (btn_idx >= 0 && btn_idx <= 3) {
 				config_modal_field = 5;
 				config_modal_button = btn_idx;
 				//? Activate the button immediately
@@ -5146,8 +5194,15 @@ namespace Logs {
 					redraw = true;
 					Proc::redraw = true;  //? Refresh header Log dots
 					return true;
-				} else {
+				} else if (btn_idx == 2) {
 					//? Cancel
+					config_modal_active = false;
+					redraw = true;
+					Proc::redraw = true;  //? Refresh display
+					return true;
+				} else {
+					//? Clear All - remove ALL process configs
+					Config::clear_all_process_configs();
 					config_modal_active = false;
 					redraw = true;
 					Proc::redraw = true;  //? Refresh display
@@ -5287,10 +5342,10 @@ namespace Logs {
 		else if (config_modal_field == 5) {
 			//? Buttons
 			if (key == "left") {
-				config_modal_button = (config_modal_button - 1 + 3) % 3;
+				config_modal_button = (config_modal_button - 1 + 4) % 4;
 				redraw = true;
 			} else if (key == "right") {
-				config_modal_button = (config_modal_button + 1) % 3;
+				config_modal_button = (config_modal_button + 1) % 4;
 				redraw = true;
 			} else if (key == "enter") {
 				if (config_modal_button == 0) {
@@ -5318,8 +5373,15 @@ namespace Logs {
 					redraw = true;
 					Proc::redraw = true;  //? Refresh header Log dots
 					return true;
-				} else {
+				} else if (config_modal_button == 2) {
 					//? Cancel
+					config_modal_active = false;
+					redraw = true;
+					Proc::redraw = true;  //? Refresh display
+					return true;
+				} else {
+					//? Clear All - remove ALL process configs
+					Config::clear_all_process_configs();
 					config_modal_active = false;
 					redraw = true;
 					Proc::redraw = true;  //? Refresh display
@@ -5482,11 +5544,18 @@ namespace Logs {
 		//? Buttons (with extra space below before instructions)
 		int btn_row = modal_y + modal_h - 5;
 		out += Mv::to(btn_row, pad_x + 1);
-		const array<string, 3> buttons = {"Save", "Remove", "Cancel"};
+		const array<string, 4> buttons = {"Save", "Remove", "Cancel", "Clear All"};
 		int btn_x = pad_x + 1;
-		for (size_t i = 0; i < 3; i++) {
+		for (size_t i = 0; i < 4; i++) {
 			bool btn_sel = (config_modal_field == 5 && config_modal_button == static_cast<int>(i));
-			if (btn_sel) {
+			if (i == 3) {
+				//? "Clear All" button in Aurora red
+				if (btn_sel) {
+					out += theme("selected_bg") + theme("log_fault") + Fx::b;
+				} else {
+					out += theme("log_fault");
+				}
+			} else if (btn_sel) {
 				out += theme("selected_bg") + theme("selected_fg") + Fx::b;
 			} else {
 				out += theme("main_fg");
@@ -5554,7 +5623,7 @@ namespace Logs {
 				for (int i = 0; i < 6; i++) {
 					Input::mouse_mappings.erase("config_color_" + to_string(i));
 				}
-				for (int i = 0; i < 3; i++) {
+				for (int i = 0; i < 4; i++) {
 					Input::mouse_mappings.erase("config_btn_" + to_string(i));
 				}
 			}
@@ -5655,11 +5724,17 @@ namespace Logs {
 
 				//? Format: [L] HH:MM:SS message
 				string timestamp_short;
-				if (entry.timestamp.length() >= 19) {
-					//? Extract HH:MM:SS from "YYYY-MM-DD HH:MM:SS..."
+				if (entry.timestamp.length() >= 19 && entry.timestamp[10] == ' ') {
+					//? Full datetime: "YYYY-MM-DD HH:MM:SS..." - extract time at position 11
 					timestamp_short = entry.timestamp.substr(11, 8);
+				} else if (entry.timestamp.length() >= 8 && entry.timestamp[2] == ':' && entry.timestamp[5] == ':') {
+					//? Time only: "HH:MM:SS..." - extract from start
+					timestamp_short = entry.timestamp.substr(0, 8);
+				} else if (entry.timestamp.length() >= 8) {
+					//? Unknown format but long enough - show first 8 chars
+					timestamp_short = entry.timestamp.substr(0, 8);
 				} else {
-					timestamp_short = "??:??:??";
+					timestamp_short = entry.timestamp.empty() ? "--------" : entry.timestamp;
 				}
 
 				//? Build log line - sanitize message to remove control chars (like \r \n \t)
