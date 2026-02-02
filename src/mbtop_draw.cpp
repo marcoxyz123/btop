@@ -5621,6 +5621,18 @@ namespace Logs {
 			}
 			return false;
 		}
+		if (key == "pm_scroll_up") {
+			if (pm_editor_scroll > 0) {
+				pm_editor_scroll--;
+				redraw = true;
+			}
+			return false;
+		}
+		if (key == "pm_scroll_down") {
+			pm_editor_scroll++;
+			redraw = true;
+			return false;
+		}
 
 		return false;
 	}
@@ -5873,10 +5885,21 @@ namespace Logs {
 		}
 
 		if (ed_max_scroll > 0) {
-			if (pm_editor_scroll > 0)
+			if (pm_editor_scroll > 0) {
 				out += Mv::to(ed_start_y, right_x + right_w - 2) + theme("hi_fg") + "▲";
-			if (pm_editor_scroll < ed_max_scroll)
+				Input::mouse_mappings["pm_scroll_up"] = {ed_start_y, right_x + right_w - 2, 1, 1};
+			} else {
+				Input::mouse_mappings.erase("pm_scroll_up");
+			}
+			if (pm_editor_scroll < ed_max_scroll) {
 				out += Mv::to(ed_end_y - 1, right_x + right_w - 2) + theme("hi_fg") + "▼";
+				Input::mouse_mappings["pm_scroll_down"] = {ed_end_y - 1, right_x + right_w - 2, 1, 1};
+			} else {
+				Input::mouse_mappings.erase("pm_scroll_down");
+			}
+		} else {
+			Input::mouse_mappings.erase("pm_scroll_up");
+			Input::mouse_mappings.erase("pm_scroll_down");
 		}
 
 		out += Mv::to(modal_y + modal_h - 2, modal_x + 2);
