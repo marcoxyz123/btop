@@ -5469,9 +5469,15 @@ namespace Logs {
 				}
 			}
 
+			if (key == "pm_edit_panel") {
+				pm_panel_focus = 1;
+				redraw = true;
+				return false;
+			}
 			if (key.starts_with("pm_field_")) {
 				int field = key.back() - '0';
 				if (field >= 0 and field <= 5) {
+					pm_panel_focus = 1;
 					pm_editor_field = field;
 					if (field == 3) pm_edit_tagged = not pm_edit_tagged;
 					redraw = true;
@@ -5481,6 +5487,7 @@ namespace Logs {
 			if (key.starts_with("pm_color_")) {
 				int color = key.back() - '0';
 				if (color >= 0 and color <= 5 and pm_edit_tagged) {
+					pm_panel_focus = 1;
 					pm_edit_color_idx = color;
 					pm_editor_field = 4;
 					redraw = true;
@@ -5490,6 +5497,7 @@ namespace Logs {
 			if (key.starts_with("pm_btn_")) {
 				int btn = key.back() - '0';
 				if (btn >= 0 and btn <= 2) {
+					pm_panel_focus = 1;
 					pm_editor_field = 5;
 					pm_editor_button = btn;
 					if (btn == 0) {
@@ -5565,6 +5573,7 @@ namespace Logs {
 
 		out += Mv::to(modal_y + 1, modal_x + 2) + theme("hi_fg") + "DEFINED PROCESSES";
 		out += Mv::to(modal_y + 1, right_x + 2) + theme("hi_fg") + "EDIT PROCESS";
+		Input::mouse_mappings["pm_edit_panel"] = {modal_y + 1, right_x, 1, right_w};
 
 		const int list_start_y = modal_y + 3;
 		const int list_visible = modal_h - 6;
@@ -5706,6 +5715,7 @@ namespace Logs {
 
 		bool color_sel = field_focus and pm_editor_field == 4;
 		out += Mv::to(ed_y, ed_x) + theme("main_fg") + "Color:   ";
+		Input::mouse_mappings["pm_field_4"] = {ed_y, ed_x, 1, 9};
 		if (not pm_edit_tagged) {
 			out += theme("inactive_fg") + "(enable Tagged first)";
 			for (int i = 0; i < 6; i++) Input::mouse_mappings.erase("pm_color_" + to_string(i));
