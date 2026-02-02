@@ -676,6 +676,13 @@ namespace Input {
 				else if (key == "logs_source") {
 					Logs::toggle_source();
 				}
+				else if (key == "logs_copy_fmt") {
+					Config::logging.copy_format = (Config::logging.copy_format == "raw") ? "mbtop" : "raw";
+					Logs::toast_active = true;
+					Logs::toast_time = Tools::time_ms();
+					Logs::toast_message = "Copy format: " + Config::logging.copy_format;
+					Logs::redraw = true;
+				}
 				//? Color picker modal clicks
 				else if (key == "color_0" or key == "color_1" or key == "color_2" or key == "color_3" or key == "color_4" or key == "color_5") {
 					if (Logs::color_modal_active) {

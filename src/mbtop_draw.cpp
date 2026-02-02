@@ -6184,10 +6184,11 @@ namespace Logs {
 			int cur_x = x + 1;
 			
 			//? Calculate required width for full mode dynamically
-			//? Full: [LIVE]=7 + filter=len+1 + S:Sys●●=9 + pos=len+1 + |=2 + SPC:Pause=10 + E:Export=9 + F:Filter=9 + R:New=6 + B:xxx=2+len
+			//? Full: [LIVE]=7 + filter=len+1 + S:Sys●●=9 + pos=len+1 + |=2 + SPC:Pause=10 + E:Export=9 + F:Filter=9 + R:New=6 + B:xxx=2+len + C:Mbt=6
+			string copy_fmt = (Config::logging.copy_format == "raw") ? "Raw" : "Mbt";
 			int full_mode_width = 7 + static_cast<int>(filter_name.length()) + 1 + 9 
 				+ static_cast<int>(pos_str.length()) + 1 + 2 + 10 + 9 + 9 + 6 + 2 
-				+ static_cast<int>(to_string(max_entries).length());
+				+ static_cast<int>(to_string(max_entries).length()) + 1 + 2 + static_cast<int>(copy_fmt.length());
 			//? Use compact mode if full mode won't fit (with 2 char margin for safety)
 			bool compact = (content_width < full_mode_width + 2);
 			
@@ -6256,7 +6257,7 @@ namespace Logs {
 			
 			//? Buttons - full or compact labels
 			if (compact) {
-				//? Compact: Spc E F R B
+				//? Compact: Spc E F R B C
 				int p_x = cur_x;
 				out += hi + "Spc" + fg + " ";
 				cur_x += 4;
@@ -6278,11 +6279,16 @@ namespace Logs {
 				Input::mouse_mappings["logs_sort"] = {status_y, r_x, 1, 1};
 				
 				int b_x = cur_x;
-				out += hi + "B" + fg + ":" + to_string(max_entries);
-				cur_x += 2 + static_cast<int>(to_string(max_entries).length());
+				out += hi + "B" + fg + ":" + to_string(max_entries) + " ";
+				cur_x += 2 + static_cast<int>(to_string(max_entries).length()) + 1;
 				Input::mouse_mappings["logs_buffer"] = {status_y, b_x, 1, 2 + static_cast<int>(to_string(max_entries).length())};
+
+				int c_x = cur_x;
+				out += hi + "C" + fg + ":" + (Config::logging.copy_format == "raw" ? "R" : "M");
+				cur_x += 3;
+				Input::mouse_mappings["logs_copy_fmt"] = {status_y, c_x, 1, 3};
 			} else {
-				//? Full: SPC:Pause E:Export F:Filter R:New B:500
+				//? Full: SPC:Pause E:Export F:Filter R:New B:500 C:Mbt
 				int p_x = cur_x;
 				out += hi + "SPC" + fg + ":Pause ";
 				cur_x += 10;
@@ -6304,16 +6310,22 @@ namespace Logs {
 				Input::mouse_mappings["logs_sort"] = {status_y, r_x, 1, 2 + static_cast<int>(sort_str.length())};
 				
 				int b_x = cur_x;
-				out += hi + "B" + fg + ":" + to_string(max_entries);
-				cur_x += 2 + static_cast<int>(to_string(max_entries).length());
+				out += hi + "B" + fg + ":" + to_string(max_entries) + " ";
+				cur_x += 2 + static_cast<int>(to_string(max_entries).length()) + 1;
 				Input::mouse_mappings["logs_buffer"] = {status_y, b_x, 1, 2 + static_cast<int>(to_string(max_entries).length())};
+
+				int c_x = cur_x;
+				out += hi + "C" + fg + ":" + copy_fmt;
+				cur_x += 2 + static_cast<int>(copy_fmt.length());
+				Input::mouse_mappings["logs_copy_fmt"] = {status_y, c_x, 1, 2 + static_cast<int>(copy_fmt.length())};
 			}
 			
-			//? Pad remaining space
+			//? Pad remaining space and restore right border
 			int remaining = content_width - (cur_x - x - 1);
 			if (remaining > 0) {
 				out += string(static_cast<size_t>(remaining), ' ');
 			}
+			out += theme("proc_box") + Symbols::right_up;
 
 			//? Draw filter selection modal if active
 			if (filter_modal_active) {
