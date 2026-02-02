@@ -5173,10 +5173,11 @@ namespace Logs {
 		bool found_match = false;
 
 		if (not auto_select_name.empty()) {
-			for (size_t i = 0; i < processes.size(); i++) {
-				const auto& cfg = processes[i];
-				if (cfg.name == auto_select_name) {
-					if (auto_select_cmd.empty() or cfg.command == auto_select_cmd) {
+			auto matched_cfg = Config::find_process_config(auto_select_name, auto_select_cmd);
+			if (matched_cfg) {
+				for (size_t i = 0; i < processes.size(); i++) {
+					const auto& cfg = processes[i];
+					if (cfg.name == matched_cfg->name and cfg.command == matched_cfg->command) {
 						pm_list_selected = static_cast<int>(i);
 						found_match = true;
 						break;
