@@ -1037,8 +1037,14 @@ namespace Input {
 			    }
 				//? Open Process Manager modal (L key)
 				else if (key == "L") {
-					if (Logs::current_pid > 0 and not Logs::current_name.empty()) {
-						Logs::show_process_manager(Logs::current_name, Logs::current_cmdline);
+					if (Config::getB("follow_process") and Config::getI("followed_pid") > 0) {
+						if (Config::getI("followed_pid") == Config::getI("detailed_pid") and Proc::detailed.status != "Dead") {
+							Logs::show_process_manager(Proc::detailed.entry.name, Proc::detailed.entry.cmd);
+						} else if (not Logs::current_name.empty()) {
+							Logs::show_process_manager(Logs::current_name, Logs::current_cmdline);
+						} else {
+							Logs::show_process_manager();
+						}
 					} else if (Config::getB("show_detailed") and Config::getI("proc_selected") == 0 and Proc::detailed.status != "Dead") {
 						Logs::show_process_manager(Proc::detailed.entry.name, Proc::detailed.entry.cmd);
 					} else {
