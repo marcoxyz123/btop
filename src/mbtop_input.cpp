@@ -1037,7 +1037,9 @@ namespace Input {
 			    }
 				//? Open Process Manager modal (L key)
 				else if (key == "L") {
-					if (Config::getB("show_detailed") and Config::getI("proc_selected") == 0 and Proc::detailed.status != "Dead") {
+					if (Logs::focused and Logs::current_pid > 0 and not Logs::current_name.empty()) {
+						Logs::show_process_manager(Logs::current_name, Logs::current_cmdline);
+					} else if (Config::getB("show_detailed") and Config::getI("proc_selected") == 0 and Proc::detailed.status != "Dead") {
 						Logs::show_process_manager(Proc::detailed.entry.name, Proc::detailed.entry.cmd);
 					} else {
 						Logs::show_process_manager();

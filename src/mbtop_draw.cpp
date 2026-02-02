@@ -5144,6 +5144,7 @@ namespace Logs {
 
 		const auto& processes = Config::logging.processes;
 		pm_list_selected = 0;
+		bool found_match = false;
 
 		if (not auto_select_name.empty()) {
 			for (size_t i = 0; i < processes.size(); i++) {
@@ -5151,13 +5152,29 @@ namespace Logs {
 				if (cfg.name == auto_select_name) {
 					if (auto_select_cmd.empty() or cfg.command == auto_select_cmd) {
 						pm_list_selected = static_cast<int>(i);
+						found_match = true;
 						break;
 					}
 				}
 			}
 		}
 
-		pm_load_selected_config();
+		if (found_match or auto_select_name.empty()) {
+			pm_load_selected_config();
+		} else {
+			pm_edit_name = auto_select_name;
+			pm_edit_command = auto_select_cmd;
+			pm_edit_original_cmd.clear();
+			pm_edit_display.clear();
+			pm_edit_path.clear();
+			pm_edit_tagged = false;
+			pm_edit_color_idx = 3;
+			pm_cmd_cursor = static_cast<int>(pm_edit_command.length());
+			pm_display_cursor = 0;
+			pm_path_cursor = 0;
+			pm_list_selected = -1;
+			pm_panel_focus = 1;
+		}
 		redraw = true;
 		Proc::redraw = true;
 	}
@@ -5243,18 +5260,18 @@ namespace Logs {
 
 		if (pm_panel_focus == 0) {
 			if (is_in(key, "down", "j") and list_count > 0) {
-				pm_list_selected = (pm_list_selected + 1) % list_count;
+				pm_list_selected = (pm_list_selected < 0) ? 0 : (pm_list_selected + 1) % list_count;
 				pm_load_selected_config();
 				redraw = true;
 				return false;
 			}
 			if (is_in(key, "up", "k") and list_count > 0) {
-				pm_list_selected = (pm_list_selected - 1 + list_count) % list_count;
+				pm_list_selected = (pm_list_selected < 0) ? list_count - 1 : (pm_list_selected - 1 + list_count) % list_count;
 				pm_load_selected_config();
 				redraw = true;
 				return false;
 			}
-			if (key == "enter" and list_count > 0) {
+			if (key == "enter" and (list_count > 0 or pm_list_selected < 0)) {
 				pm_panel_focus = 1;
 				pm_editor_field = 0;
 				redraw = true;
@@ -5417,10 +5434,18 @@ namespace Logs {
 						cfg.log_path = pm_edit_path;
 						cfg.tagged = pm_edit_tagged;
 						cfg.tag_color = pm_edit_tagged ? string(TagColors::themes[static_cast<size_t>(pm_edit_color_idx)]) : "";
-						if (pm_edit_command != pm_edit_original_cmd) {
+						if (not pm_edit_original_cmd.empty() and pm_edit_command != pm_edit_original_cmd) {
 							Config::remove_process_config(pm_edit_name, pm_edit_original_cmd);
 						}
 						Config::save_process_config(cfg);
+						const auto& procs = Config::logging.processes;
+						for (size_t i = 0; i < procs.size(); i++) {
+							if (procs[i].name == pm_edit_name and procs[i].command == pm_edit_command) {
+								pm_list_selected = static_cast<int>(i);
+								break;
+							}
+						}
+						pm_edit_original_cmd = pm_edit_command;
 						pm_load_selected_config();
 						redraw = true;
 						Proc::redraw = true;
@@ -5558,8 +5583,10 @@ namespace Logs {
 		const int list_start_y = modal_y + 3;
 		const int list_visible = modal_h - 6;
 
-		if (pm_list_selected < pm_list_scroll) pm_list_scroll = pm_list_selected;
-		if (pm_list_selected >= pm_list_scroll + list_visible) pm_list_scroll = pm_list_selected - list_visible + 1;
+		if (pm_list_selected >= 0) {
+			if (pm_list_selected < pm_list_scroll) pm_list_scroll = pm_list_selected;
+			if (pm_list_selected >= pm_list_scroll + list_visible) pm_list_scroll = pm_list_selected - list_visible + 1;
+		}
 
 		for (int i = 0; i < list_visible; i++) {
 			int idx = pm_list_scroll + i;
