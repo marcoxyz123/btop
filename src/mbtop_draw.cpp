@@ -5600,9 +5600,21 @@ namespace Logs {
 
 				string display = cfg.display_name.empty() ? cfg.name : cfg.display_name;
 				string suffix = " (" + cfg.name + ")";
-				int max_name_len = left_w - 7;
-				if (static_cast<int>(display.length() + suffix.length()) > max_name_len) {
-					display = display.substr(0, static_cast<size_t>(std::max(0, max_name_len - static_cast<int>(suffix.length()) - 2))) + "..";
+				int max_total = left_w - 8;
+				int total_len = static_cast<int>(display.length() + suffix.length());
+				
+				if (total_len > max_total) {
+					int display_max = std::min(static_cast<int>(display.length()), max_total - 6);
+					if (display_max < static_cast<int>(display.length())) {
+						display = display.substr(0, static_cast<size_t>(std::max(1, display_max - 2))) + "..";
+					}
+					int suffix_space = max_total - static_cast<int>(display.length());
+					if (suffix_space >= 6 and static_cast<int>(suffix.length()) > suffix_space) {
+						int name_space = suffix_space - 5;
+						suffix = " (" + cfg.name.substr(0, static_cast<size_t>(name_space)) + "..)";
+					} else if (suffix_space < 6) {
+						suffix = "";
+					}
 				}
 
 				if (is_sel) {
