@@ -5165,16 +5165,25 @@ namespace Logs {
 		if (entries.empty()) return false;
 
 		string text;
-		text.reserve(entries.size() * 100);
+		text.reserve(entries.size() * 150);
+
+		bool raw_format = (Config::logging.copy_format == "raw");
 
 		for (const auto& entry : entries) {
-			text += "[" + entry.level.substr(0, 1) + "] (" + entry.timestamp + ") " + entry.message + "\n";
+			if (raw_format) {
+				text += entry.timestamp + " [" + entry.level + "] ";
+				if (not entry.subsystem.empty()) text += entry.subsystem;
+				if (not entry.category.empty()) text += "/" + entry.category;
+				text += ": " + entry.message + "\n";
+			} else {
+				text += "[" + entry.level.substr(0, 1) + "] (" + entry.timestamp + ") " + entry.message + "\n";
+			}
 		}
 
 		if (Tools::copy_to_clipboard(text)) {
 			toast_active = true;
 			toast_time = Tools::time_ms();
-			toast_message = "Copied " + to_string(entries.size()) + " log entries!";
+			toast_message = "Copied " + to_string(entries.size()) + " entries (" + Config::logging.copy_format + ")";
 			redraw = true;
 			return true;
 		}

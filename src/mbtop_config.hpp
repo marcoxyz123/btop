@@ -66,6 +66,7 @@ namespace Config {
 		string level = "WARNING";
 		string export_path;
 		string default_source = "system";  // "system" or "application"
+		string copy_format = "mbtop";      // "raw" or "mbtop"
 		int buffer_size = 500;
 		bool color_full_line = false;
 		bool below_proc = false;

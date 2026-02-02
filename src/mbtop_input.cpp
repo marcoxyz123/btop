@@ -716,6 +716,13 @@ namespace Input {
 						//? Shift+B = Show buffer size modal
 						Logs::show_buffer_modal();
 					}
+					else if (key == "C") {
+						Config::logging.copy_format = (Config::logging.copy_format == "raw") ? "mbtop" : "raw";
+						Logs::toast_active = true;
+						Logs::toast_time = Tools::time_ms();
+						Logs::toast_message = "Copy format: " + Config::logging.copy_format;
+						Logs::redraw = true;
+					}
 					else if (key == "page_up") {
 						//? Scroll up (towards older entries) with upper bound
 						int visible_rows = Logs::height - 3;
