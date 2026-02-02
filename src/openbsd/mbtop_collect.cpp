@@ -1335,22 +1335,6 @@ namespace Tools {
 }  // namespace Tools
 
 namespace Logs {
-	string box;
-	int x = 0, y = 0, width = 0, height = 0, min_width = 0, min_height = 0;
-	bool shown = false, redraw = false, focused = false, paused = false, exporting = false;
-	string export_filename, export_error;
-	bool reverse_order = false;
-	int scroll_offset = 0;
-	pid_t current_pid = 0;
-	string current_name;
-	Source source = Source::System;
-	bool source_changed = false;
-	string app_log_path;
-	bool app_log_available = false;
-	string custom_display_name, custom_tag_color, current_cmdline;
-	uint8_t level_filter = 0;
-	deque<LogEntry> entries;
-	size_t max_entries = 1000;
 	bool filter_modal_active = false;
 	int filter_modal_selected = 0;
 	bool buffer_modal_active = false;
@@ -1358,23 +1342,12 @@ namespace Logs {
 	string buffer_custom_input;
 	bool error_modal_active = false;
 	string error_modal_message;
-	bool toast_active = false;
-	uint64_t toast_time = 0;
-	string toast_message;
-	bool process_manager_active = false;
-	int pm_list_selected = 0, pm_list_scroll = 0, pm_panel_focus = 0, pm_editor_field = 0, pm_editor_scroll = 0;
-	string pm_cmd_input, pm_display_input, pm_path_input;
-	bool pm_tagged_input = false;
-	int pm_color_input = 0, pm_log_view_input = 0;
-	bool pm_save_pending = false, pm_delete_pending = false;
+
 	void collect() {}
 	void clear() {}
 	void toggle_pause() {}
 	void start_export() {}
 	void stop_export() {}
-	void toggle_sort_order() {}
-	string get_filter_name() { return "All"; }
-	string get_filter_color() { return ""; }
 	void show_filter_modal() {}
 	bool filter_modal_input(const std::string_view) { return true; }
 	void set_filter(int) {}
@@ -1383,5 +1356,4 @@ namespace Logs {
 	void set_buffer_size(size_t) {}
 	void show_error_modal(const string&) {}
 	bool error_modal_input(const std::string_view) { return true; }
-	bool copy_to_clipboard() { return false; }
-}  // namespace Logs
+}
