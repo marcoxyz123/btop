@@ -5665,10 +5665,23 @@ namespace Logs {
 			if (value.empty()) {
 				text = sel ? "_" + string(static_cast<size_t>(max_len - 1), ' ') : string(static_cast<size_t>(max_len), '_');
 			} else if (sel) {
-				text = value.substr(0, static_cast<size_t>(cursor)) + "_" + value.substr(static_cast<size_t>(cursor));
-				text += string(std::max(0, max_len - static_cast<int>(text.length())), ' ');
+				int view_offset = 0;
+				int display_len = max_len - 1;
+				if (cursor > display_len) {
+					view_offset = cursor - display_len;
+				}
+				string visible = value.substr(static_cast<size_t>(view_offset));
+				int rel_cursor = cursor - view_offset;
+				text = visible.substr(0, static_cast<size_t>(rel_cursor)) + "_" + visible.substr(static_cast<size_t>(rel_cursor));
+				if (static_cast<int>(text.length()) < max_len) {
+					text += string(static_cast<size_t>(max_len - static_cast<int>(text.length())), ' ');
+				}
 			} else {
-				text = value + string(std::max(0, max_len - static_cast<int>(value.length())), ' ');
+				int view_offset = std::max(0, static_cast<int>(value.length()) - max_len);
+				text = value.substr(static_cast<size_t>(view_offset));
+				if (static_cast<int>(text.length()) < max_len) {
+					text += string(static_cast<size_t>(max_len - static_cast<int>(text.length())), ' ');
+				}
 			}
 			out += "[" + text.substr(0, static_cast<size_t>(max_len + 1)) + "]" + Fx::reset;
 			Input::mouse_mappings["pm_field_" + to_string(field_idx)] = {ed_y, ed_x, 1, right_w - 4};
