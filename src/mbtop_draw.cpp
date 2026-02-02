@@ -5600,7 +5600,7 @@ namespace Logs {
 
 				string display = cfg.display_name.empty() ? cfg.name : cfg.display_name;
 				string suffix = " (" + cfg.name + ")";
-				int max_name_len = left_w - 10;
+				int max_name_len = left_w - 7;
 				if (static_cast<int>(display.length() + suffix.length()) > max_name_len) {
 					display = display.substr(0, static_cast<size_t>(std::max(0, max_name_len - static_cast<int>(suffix.length()) - 2))) + "..";
 				}
@@ -5713,6 +5713,7 @@ namespace Logs {
 		}
 		ed_y += 2;
 
+		out += Mv::to(ed_y, ed_x);
 		const array<string, 3> buttons = {"Save", "Remove", "Cancel"};
 		int btn_x = ed_x;
 		for (size_t i = 0; i < 3; i++) {
