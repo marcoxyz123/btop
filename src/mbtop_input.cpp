@@ -225,11 +225,23 @@ namespace Input {
 		if (key.empty()) return;
 		try {
 			//? Handle Logs modals FIRST - they must capture ALL input before global handlers
-			if (Logs::config_modal_active) {
-				Logs::config_modal_input(key);
+			if (Logs::process_manager_active) {
+				if (key == "pm_close") {
+					Logs::process_manager_active = false;
+					Logs::redraw = true;
+					Proc::redraw = true;
+				} else if (key == "pm_new") {
+					Logs::pm_adding_new = true;
+					Logs::pm_new_name_input.clear();
+					Logs::pm_newname_cursor = 0;
+					Logs::redraw = true;
+				} else {
+					Logs::process_manager_input(key);
+				}
 				Runner::run("all", true, true);
 				return;
 			}
+
 			if (Logs::color_modal_active) {
 				if (Logs::color_modal_input(key)) {
 					Runner::run("all", true, true);
@@ -582,7 +594,7 @@ namespace Input {
 				bool keep_going = false;
 				bool redraw = true;
 
-				//? Note: config_modal, color_modal, error_modal are now handled at the top of process()
+				//? Note: process_manager, color_modal, error_modal are now handled at the top of process()
 				//? to ensure they capture input before global handlers (like 'o' for Options menu)
 
 				//? Handle filter modal input if active
@@ -1023,10 +1035,13 @@ namespace Input {
 				    Menu::show(Menu::Menus::Renice);
 				    return;
 			    }
-				//? Open Log Config modal (L key)
-				else if (key == "L" and Config::getB("show_detailed") and Config::getI("proc_selected") == 0) {
-					if (Proc::detailed.status == "Dead") return;
-					Logs::show_config_modal(Proc::detailed.entry.name, Proc::detailed.entry.cmd);
+				//? Open Process Manager modal (L key)
+				else if (key == "L") {
+					if (Config::getB("show_detailed") and Config::getI("proc_selected") == 0 and Proc::detailed.status != "Dead") {
+						Logs::show_process_manager(Proc::detailed.entry.name, Proc::detailed.entry.cmd);
+					} else {
+						Logs::show_process_manager();
+					}
 					Runner::run("all", true, true);
 					return;
 				}
