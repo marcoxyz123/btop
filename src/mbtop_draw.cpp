@@ -6320,12 +6320,11 @@ namespace Logs {
 				Input::mouse_mappings["logs_copy_fmt"] = {status_y, c_x, 1, 2 + static_cast<int>(copy_fmt.length())};
 			}
 			
-			//? Pad remaining space and restore right border
+			//? Pad remaining space
 			int remaining = content_width - (cur_x - x - 1);
 			if (remaining > 0) {
 				out += string(static_cast<size_t>(remaining), ' ');
 			}
-			out += theme("proc_box") + Symbols::right_up;
 
 			//? Draw filter selection modal if active
 			if (filter_modal_active) {
