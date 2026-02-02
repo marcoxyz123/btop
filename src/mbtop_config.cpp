@@ -315,6 +315,8 @@ namespace Config {
 
 		{"net_sync", 			"#* Sync the auto scaling for download and upload to whichever currently has the highest scale."},
 
+		{"net_zero_on_start",	"#* Zero network totals on startup. When True, shows session totals instead of all-time totals."},
+
 		{"net_graph_direction", "#* Direction of the network graph. 0 = Right to Left (default, newest data on right), 1 = Left to Right (newest data on left). Cycle with Shift+3."},
 
 		{"net_iface", 			"#* Starts with the Network Interface specified here."},
@@ -490,6 +492,7 @@ namespace Config {
 		{"io_graph_combined", false},
 		{"net_auto", true},
 		{"net_sync", true},
+		{"net_zero_on_start", false},
 		{"show_battery", true},
 		{"show_battery_watts", true},
 		{"vim_keys", false},
@@ -1912,6 +1915,14 @@ namespace Config {
 			skip_filter_sync_on_reload = true;  //? Don't sync filter when untagging via UI
 			write_toml(true);  //? Force write - process configs always persist
 		}
+	}
+
+	void clear_all_process_configs() {
+		if (logging.processes.empty()) return;
+		logging.processes.clear();
+		skip_filter_sync_on_reload = true;  //? Don't sync filter when clearing
+		write_toml(true);  //? Force write - process configs always persist
+		Logger::info("Cleared all process configs");
 	}
 
 	//? Track config file modification time for dynamic reload

@@ -40,6 +40,9 @@ tab-size = 4
 
 #include <fmt/format.h>
 
+#include <ifaddrs.h>
+#include <net/if.h>
+
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 #include <sys/mount.h>
@@ -899,6 +902,13 @@ namespace Menu {
 				"",
 				"Syncs the scaling for download and upload to",
 				"whichever currently has the highest scale.",
+				"",
+				"True or False."},
+			{"net_zero_on_start",
+				"Zero network totals on startup.",
+				"",
+				"When True, shows session totals instead of",
+				"all-time totals since system boot.",
 				"",
 				"True or False."},
 			{"net_iface",
@@ -3291,10 +3301,11 @@ namespace MenuV2 {
 
 					//? ==================== Network Sub-tab ====================
 					{"Net | Display", {
-						{"net_auto", "Auto Select", "Auto-select primary network interface", ControlType::Toggle, {}, "", 0, 0, 0},
+						{"net_auto", "Auto Scale", "Auto-scale network graphs based on traffic", ControlType::Toggle, {}, "", 0, 0, 0},
 						{"net_iface", "Interface", "Select network interface to display", ControlType::Select, {}, "net_iface", 0, 0, 0},
 						{"net_iface_filter", "Interfaces to Show", "Select interfaces for cycling (empty = show all)", ControlType::Select, {}, "net_iface_filter", 0, 0, 0},
 						{"net_sync", "Sync Scales", "Synchronize upload/download graph scales", ControlType::Toggle, {}, "", 0, 0, 0},
+						{"net_zero_on_start", "Zero on Start", "Zero network totals on startup (show session totals)", ControlType::Toggle, {}, "", 0, 0, 0},
 						{"swap_upload_download", "Swap Up/Down", "Swap upload and download positions", ControlType::Toggle, {}, "", 0, 0, 0},
 					}},
 					{"NET | Reference", {
@@ -3625,18 +3636,22 @@ namespace MenuV2 {
 	vector<string> getDynamicChoices(const string& choices_ref) {
 		vector<string> choices;
 
-		if (choices_ref == "net_iface") {
-			// Return available network interfaces
-			choices.push_back("");  // Empty = auto-select
-			for (const auto& iface : Net::interfaces) {
-				choices.push_back(iface);
-			}
-		}
-		else if (choices_ref == "net_iface_filter") {
-			// Return available network interfaces for filtering (multi-select)
-			choices.push_back("");  // Empty = show all interfaces
-			for (const auto& iface : Net::interfaces) {
-				choices.push_back(iface);
+		if (choices_ref == "net_iface" or choices_ref == "net_iface_filter") {
+			// Query system directly for network interfaces (don't rely on Net::collect which may not have run)
+			choices.push_back("");
+			
+			struct ifaddrs* ifaddr = nullptr;
+			if (getifaddrs(&ifaddr) == 0) {
+				std::set<string> seen_ifaces;
+				for (auto* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+					if (ifa->ifa_name == nullptr) continue;
+					string iface_name = ifa->ifa_name;
+					if (not seen_ifaces.contains(iface_name)) {
+						seen_ifaces.insert(iface_name);
+						choices.push_back(iface_name);
+					}
+				}
+				freeifaddrs(ifaddr);
 			}
 		}
 		else if (choices_ref == "disks_filter") {

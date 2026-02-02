@@ -974,6 +974,18 @@ namespace Net {
 		}
 
 		rescale = false;
+
+		//? Apply zero-on-start if configured (only once on first successful collection)
+		static bool zero_on_start_applied = false;
+		if (not zero_on_start_applied and Config::getB("net_zero_on_start") and not selected_iface.empty()) {
+			auto& ndev = net.at(selected_iface);
+			for (const string dir : {"download", "upload"}) {
+				auto& stat = ndev.stat.at(dir);
+				stat.offset = stat.last + stat.rollover;
+			}
+			zero_on_start_applied = true;
+		}
+
 		return net.at(selected_iface);
 	}
 }  // namespace Net
