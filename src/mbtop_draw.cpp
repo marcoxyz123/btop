@@ -4836,6 +4836,7 @@ namespace Logs {
 	int pm_display_cursor = 0;
 	int pm_path_cursor = 0;
 	int pm_newname_cursor = 0;
+	int pm_editor_scroll = 0;
 
 	//=== Color Picker Modal State ===
 	bool color_modal_active = false;
@@ -5109,6 +5110,7 @@ namespace Logs {
 
 	void pm_load_selected_config() {
 		const auto& processes = Config::logging.processes;
+		pm_editor_scroll = 0;
 		if (pm_list_selected < 0 or pm_list_selected >= static_cast<int>(processes.size())) {
 			pm_edit_name.clear();
 			pm_edit_command.clear();
@@ -5159,6 +5161,7 @@ namespace Logs {
 		pm_new_name_input.clear();
 		pm_newname_cursor = 0;
 		pm_list_scroll = 0;
+		pm_editor_scroll = 0;
 
 		const auto& processes = Config::logging.processes;
 		pm_list_selected = 0;
@@ -5717,121 +5720,145 @@ namespace Logs {
 		}
 
 		const int ed_x = right_x + 2;
-		int ed_y = modal_y + 3;
+		const int ed_start_y = modal_y + 3;
+		const int ed_end_y = modal_y + modal_h - 3;
+		const int ed_visible = ed_end_y - ed_start_y;
 
-		out += Mv::to(ed_y, ed_x) + theme("inactive_fg") + "Process: " + theme("main_fg") + pm_edit_name;
-		ed_y++;
+		const int ed_content_lines = 14;
+		const int ed_max_scroll = std::max(0, ed_content_lines - ed_visible);
+		pm_editor_scroll = std::clamp(pm_editor_scroll, 0, ed_max_scroll);
+
+		if (pm_panel_focus == 1) {
+			int field_start_line[] = {0, 3, 5, 7, 9, 11, 13};
+			int target_line = field_start_line[std::min(pm_editor_field, 6)];
+			if (target_line < pm_editor_scroll) pm_editor_scroll = target_line;
+			if (target_line >= pm_editor_scroll + ed_visible) pm_editor_scroll = target_line - ed_visible + 1;
+		}
 
 		bool field_focus = (pm_panel_focus == 1);
+		int content_line = 0;
+
+		auto in_view = [&](int line) { return line >= pm_editor_scroll and line < pm_editor_scroll + ed_visible; };
+		auto screen_y = [&](int line) { return ed_start_y + line - pm_editor_scroll; };
 
 		auto draw_text_field = [&](int field_idx, const string& label, const string& value, int cursor, int max_len) {
+			if (not in_view(content_line)) { content_line++; return; }
+			int y = screen_y(content_line);
 			bool sel = field_focus and pm_editor_field == field_idx;
-			out += Mv::to(ed_y, ed_x);
-			out += theme("main_fg") + label + ": ";
+			out += Mv::to(y, ed_x) + theme("main_fg") + label + ": ";
 			if (sel) out += theme("selected_bg") + theme("selected_fg");
 			string text;
 			if (value.empty()) {
 				text = sel ? "_" + string(static_cast<size_t>(max_len - 1), ' ') : string(static_cast<size_t>(max_len), '_');
 			} else if (sel) {
-				int view_offset = 0;
-				int display_len = max_len - 1;
-				if (cursor > display_len) {
-					view_offset = cursor - display_len;
-				}
+				int view_offset = 0, display_len = max_len - 1;
+				if (cursor > display_len) view_offset = cursor - display_len;
 				string visible = value.substr(static_cast<size_t>(view_offset));
 				int rel_cursor = cursor - view_offset;
 				text = visible.substr(0, static_cast<size_t>(rel_cursor)) + "_" + visible.substr(static_cast<size_t>(rel_cursor));
-				if (static_cast<int>(text.length()) < max_len) {
-					text += string(static_cast<size_t>(max_len - static_cast<int>(text.length())), ' ');
-				}
+				if (static_cast<int>(text.length()) < max_len) text += string(static_cast<size_t>(max_len - static_cast<int>(text.length())), ' ');
 			} else {
 				int view_offset = std::max(0, static_cast<int>(value.length()) - max_len);
 				text = value.substr(static_cast<size_t>(view_offset));
-				if (static_cast<int>(text.length()) < max_len) {
-					text += string(static_cast<size_t>(max_len - static_cast<int>(text.length())), ' ');
-				}
+				if (static_cast<int>(text.length()) < max_len) text += string(static_cast<size_t>(max_len - static_cast<int>(text.length())), ' ');
 			}
 			out += "[" + text.substr(0, static_cast<size_t>(max_len + 1)) + "]" + Fx::reset;
-			Input::mouse_mappings["pm_field_" + to_string(field_idx)] = {ed_y, ed_x, 1, right_w - 4};
-			ed_y++;
+			Input::mouse_mappings["pm_field_" + to_string(field_idx)] = {y, ed_x, 1, right_w - 4};
+			content_line++;
 		};
 
+		if (in_view(content_line)) {
+			out += Mv::to(screen_y(content_line), ed_x) + theme("inactive_fg") + "Process: " + theme("main_fg") + pm_edit_name;
+		}
+		content_line++;
+
 		draw_text_field(0, "Command", pm_edit_command, pm_cmd_cursor, right_w - 14);
-		out += Mv::to(ed_y, ed_x + 9) + theme("inactive_fg") + "(use * for wildcard)";
-		ed_y += 2;
+		if (in_view(content_line)) {
+			out += Mv::to(screen_y(content_line), ed_x + 9) + theme("inactive_fg") + "(use * for wildcard)";
+		}
+		content_line += 2;
 
 		draw_text_field(1, "Display", pm_edit_display, pm_display_cursor, 20);
-		ed_y++;
+		content_line++;
 
 		draw_text_field(2, "LogPath", pm_edit_path, pm_path_cursor, right_w - 14);
-		ed_y++;
+		content_line++;
 
-		bool logdisp_sel = field_focus and pm_editor_field == 3;
-		out += Mv::to(ed_y, ed_x) + theme("main_fg") + "Log View:";
-		int radio_x = ed_x + 10;
-		bool sys_sel = logdisp_sel and pm_edit_log_display == 0;
-		bool app_sel = logdisp_sel and pm_edit_log_display == 1;
-		out += Mv::to(ed_y, radio_x);
-		if (sys_sel) out += theme("selected_bg") + theme("selected_fg");
-		out += (pm_edit_log_display == 0 ? "●" : "○") + Fx::reset + " ";
-		out += theme("main_fg") + "System ";
-		Input::mouse_mappings["pm_logdisp_0"] = {ed_y, radio_x, 1, 8};
-		radio_x += 9;
-		if (app_sel) out += theme("selected_bg") + theme("selected_fg");
-		out += (pm_edit_log_display == 1 ? "●" : "○") + Fx::reset + " ";
-		out += theme("main_fg") + "Application";
-		Input::mouse_mappings["pm_logdisp_1"] = {ed_y, radio_x, 1, 13};
-		Input::mouse_mappings["pm_field_3"] = {ed_y, ed_x, 1, 10};
-		ed_y += 2;
-
-		bool tagged_sel = field_focus and pm_editor_field == 4;
-		out += Mv::to(ed_y, ed_x) + theme("main_fg") + "Tagged:  ";
-		if (tagged_sel) out += theme("selected_bg") + theme("selected_fg");
-		out += "[" + string(pm_edit_tagged ? "x" : " ") + "]" + Fx::reset;
-		out += theme("inactive_fg") + " (highlight in list)";
-		Input::mouse_mappings["pm_field_4"] = {ed_y, ed_x + 9, 1, 3};
-		ed_y += 2;
-
-		bool color_sel = field_focus and pm_editor_field == 5;
-		out += Mv::to(ed_y, ed_x) + theme("main_fg") + "Color:   ";
-		Input::mouse_mappings["pm_field_5"] = {ed_y, ed_x, 1, 9};
-		if (not pm_edit_tagged) {
-			out += theme("inactive_fg") + "(enable Tagged first)";
-			for (int i = 0; i < 6; i++) Input::mouse_mappings.erase("pm_color_" + to_string(i));
-		} else {
-			for (size_t i = 0; i < 6; i++) {
-				bool this_sel = color_sel and static_cast<int>(i) == pm_edit_color_idx;
-				if (this_sel) out += theme("selected_bg");
-				out += theme(TagColors::themes[i]) + "██" + Fx::reset + " ";
-				Input::mouse_mappings["pm_color_" + to_string(i)] = {ed_y, ed_x + 9 + static_cast<int>(i) * 3, 1, 2};
-			}
-			out += theme("inactive_fg") + "(1-6)";
+		if (in_view(content_line)) {
+			int y = screen_y(content_line);
+			bool logdisp_sel = field_focus and pm_editor_field == 3;
+			out += Mv::to(y, ed_x) + theme("main_fg") + "Log View:";
+			int radio_x = ed_x + 10;
+			if (logdisp_sel and pm_edit_log_display == 0) out += theme("selected_bg") + theme("selected_fg");
+			out += Mv::to(y, radio_x) + (pm_edit_log_display == 0 ? "●" : "○") + Fx::reset + " " + theme("main_fg") + "System ";
+			Input::mouse_mappings["pm_logdisp_0"] = {y, radio_x, 1, 8};
+			radio_x += 9;
+			if (logdisp_sel and pm_edit_log_display == 1) out += theme("selected_bg") + theme("selected_fg");
+			out += (pm_edit_log_display == 1 ? "●" : "○") + Fx::reset + " " + theme("main_fg") + "Application";
+			Input::mouse_mappings["pm_logdisp_1"] = {y, radio_x, 1, 13};
+			Input::mouse_mappings["pm_field_3"] = {y, ed_x, 1, 10};
 		}
-		ed_y++;
+		content_line += 2;
 
-		if (pm_edit_tagged) {
-			out += Mv::to(ed_y, ed_x + 10 + pm_edit_color_idx * 3) + theme("hi_fg") + "▲";
+		if (in_view(content_line)) {
+			int y = screen_y(content_line);
+			bool tagged_sel = field_focus and pm_editor_field == 4;
+			out += Mv::to(y, ed_x) + theme("main_fg") + "Tagged:  ";
+			if (tagged_sel) out += theme("selected_bg") + theme("selected_fg");
+			out += "[" + string(pm_edit_tagged ? "x" : " ") + "]" + Fx::reset + theme("inactive_fg") + " (highlight in list)";
+			Input::mouse_mappings["pm_field_4"] = {y, ed_x + 9, 1, 3};
 		}
-		ed_y += 2;
+		content_line += 2;
 
-		out += Mv::to(ed_y, ed_x);
-		const array<string, 3> buttons = {"Save", "Remove", "Cancel"};
-		int btn_x = ed_x;
-		for (size_t i = 0; i < 3; i++) {
-			bool btn_sel = field_focus and pm_editor_field == 6 and pm_editor_button == static_cast<int>(i);
-			if (btn_sel) {
-				out += theme("selected_bg") + theme("selected_fg") + Fx::b;
+		if (in_view(content_line)) {
+			int y = screen_y(content_line);
+			bool color_sel = field_focus and pm_editor_field == 5;
+			out += Mv::to(y, ed_x) + theme("main_fg") + "Color:   ";
+			Input::mouse_mappings["pm_field_5"] = {y, ed_x, 1, 9};
+			if (not pm_edit_tagged) {
+				out += theme("inactive_fg") + "(enable Tagged first)";
+				for (int i = 0; i < 6; i++) Input::mouse_mappings.erase("pm_color_" + to_string(i));
 			} else {
-				out += theme("main_fg");
+				for (size_t i = 0; i < 6; i++) {
+					bool this_sel = color_sel and static_cast<int>(i) == pm_edit_color_idx;
+					if (this_sel) out += theme("selected_bg");
+					out += theme(TagColors::themes[i]) + "██" + Fx::reset + " ";
+					Input::mouse_mappings["pm_color_" + to_string(i)] = {y, ed_x + 9 + static_cast<int>(i) * 3, 1, 2};
+				}
+				out += theme("inactive_fg") + "(1-6)";
 			}
-			out += "[" + buttons[i] + "]" + Fx::reset + " ";
-			int w = static_cast<int>(buttons[i].length()) + 2;
-			Input::mouse_mappings["pm_btn_" + to_string(i)] = {ed_y, btn_x, 1, w};
-			btn_x += w + 1;
+		}
+		content_line++;
+		if (pm_edit_tagged and in_view(content_line)) {
+			out += Mv::to(screen_y(content_line), ed_x + 10 + pm_edit_color_idx * 3) + theme("hi_fg") + "▲";
+		}
+		content_line += 2;
+
+		if (in_view(content_line)) {
+			int y = screen_y(content_line);
+			out += Mv::to(y, ed_x);
+			const array<string, 3> buttons = {"Save", "Remove", "Cancel"};
+			int btn_x = ed_x;
+			for (size_t i = 0; i < 3; i++) {
+				bool btn_sel = field_focus and pm_editor_field == 6 and pm_editor_button == static_cast<int>(i);
+				if (btn_sel) out += theme("selected_bg") + theme("selected_fg") + Fx::b;
+				else out += theme("main_fg");
+				out += "[" + buttons[i] + "]" + Fx::reset + " ";
+				int w = static_cast<int>(buttons[i].length()) + 2;
+				Input::mouse_mappings["pm_btn_" + to_string(i)] = {y, btn_x, 1, w};
+				btn_x += w + 1;
+			}
+		}
+
+		if (ed_max_scroll > 0) {
+			if (pm_editor_scroll > 0)
+				out += Mv::to(ed_start_y, right_x + right_w - 2) + theme("hi_fg") + "▲";
+			if (pm_editor_scroll < ed_max_scroll)
+				out += Mv::to(ed_end_y - 1, right_x + right_w - 2) + theme("hi_fg") + "▼";
 		}
 
 		out += Mv::to(modal_y + modal_h - 2, modal_x + 2);
-		out += theme("inactive_fg") + "Tab:Switch  ↑↓:Navigate  Enter:Edit  n:New  Esc:Close";
+		out += theme("inactive_fg") + "Tab:Switch  ↑↓:Nav  Enter:Edit  n:New  Esc:Close";
 
 		return out;
 	}
