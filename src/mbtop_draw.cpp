@@ -5746,12 +5746,12 @@ namespace Logs {
 		const int ed_end_y = modal_y + modal_h - 3;
 		const int ed_visible = ed_end_y - ed_start_y;
 
-		const int ed_content_lines = 14;
+		const int ed_content_lines = 16;
 		const int ed_max_scroll = std::max(0, ed_content_lines - ed_visible);
 		pm_editor_scroll = std::clamp(pm_editor_scroll, 0, ed_max_scroll);
 
 		if (pm_panel_focus == 1) {
-			int field_start_line[] = {0, 3, 5, 7, 9, 11, 13};
+			int field_start_line[] = {1, 4, 6, 8, 10, 12, 15};
 			int target_line = field_start_line[std::min(pm_editor_field, 6)];
 			if (target_line < pm_editor_scroll) pm_editor_scroll = target_line;
 			if (target_line >= pm_editor_scroll + ed_visible) pm_editor_scroll = target_line - ed_visible + 1;
