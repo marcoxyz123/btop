@@ -4827,6 +4827,7 @@ namespace Logs {
 	string pm_edit_command;
 	string pm_edit_display;
 	string pm_edit_path;
+	int pm_edit_log_display = 0;      // 0 = System, 1 = Application
 	bool pm_edit_tagged = false;
 	int pm_edit_color_idx = 3;
 	string pm_edit_original_cmd;
@@ -4915,11 +4916,14 @@ namespace Logs {
 		custom_display_name.clear();
 		custom_tag_color.clear();
 
+		string preferred_source;
+
 		//? Look up config
 		if (auto cfg = Config::find_process_config(name, cmdline)) {
 			app_log_path = cfg->log_path;
 			custom_display_name = cfg->display_name;
 			custom_tag_color = cfg->tag_color;
+			preferred_source = cfg->log_display;
 
 			//? Expand ~ to home directory
 			if (!app_log_path.empty() && app_log_path[0] == '~') {
@@ -4936,9 +4940,15 @@ namespace Logs {
 			}
 		}
 
-		//? Set source based on config default and availability
-		if (Config::logging.default_source == "application" && app_log_available) {
+		//? Set source: per-process preference > app available > global default > system
+		if (preferred_source == "system") {
+			source = Source::System;
+		} else if (preferred_source == "application" and app_log_available) {
 			source = Source::Application;
+		} else if (app_log_available) {
+			source = Source::Application;
+		} else if (Config::logging.default_source == "application") {
+			source = Source::System;
 		} else {
 			source = Source::System;
 		}
@@ -5104,6 +5114,7 @@ namespace Logs {
 			pm_edit_command.clear();
 			pm_edit_display.clear();
 			pm_edit_path.clear();
+			pm_edit_log_display = 0;
 			pm_edit_tagged = false;
 			pm_edit_color_idx = 3;
 			pm_edit_original_cmd.clear();
@@ -5119,6 +5130,13 @@ namespace Logs {
 		pm_edit_original_cmd = cfg.command;
 		pm_edit_display = cfg.display_name;
 		pm_edit_path = cfg.log_path;
+		if (cfg.log_display == "application") {
+			pm_edit_log_display = 1;
+		} else if (cfg.log_display == "system") {
+			pm_edit_log_display = 0;
+		} else {
+			pm_edit_log_display = cfg.log_path.empty() ? 0 : 1;
+		}
 		pm_edit_tagged = cfg.tagged;
 		pm_edit_color_idx = 3;
 		for (size_t i = 0; i < TagColors::themes.size(); i++) {
@@ -5167,6 +5185,7 @@ namespace Logs {
 			pm_edit_original_cmd.clear();
 			pm_edit_display.clear();
 			pm_edit_path.clear();
+			pm_edit_log_display = 0;
 			pm_edit_tagged = false;
 			pm_edit_color_idx = 3;
 			pm_cmd_cursor = static_cast<int>(pm_edit_command.length());
@@ -5302,119 +5321,147 @@ namespace Logs {
 		}
 		else {
 			if (is_in(key, "down", "j", "tab")) {
-				pm_editor_field = (pm_editor_field + 1) % 6;
+				pm_editor_field = (pm_editor_field + 1) % 7;
 				redraw = true;
 				return false;
 			}
 			if (is_in(key, "up", "k", "shift_tab")) {
-				pm_editor_field = (pm_editor_field - 1 + 6) % 6;
+				pm_editor_field = (pm_editor_field - 1 + 7) % 7;
 				redraw = true;
 				return false;
 			}
 
 			if (pm_editor_field == 0) {
-				if (key == "left" and pm_cmd_cursor > 0) { pm_cmd_cursor--; redraw = true; }
-				else if (key == "right" and pm_cmd_cursor < static_cast<int>(pm_edit_command.length())) { pm_cmd_cursor++; redraw = true; }
-				else if (key == "home") { pm_cmd_cursor = 0; redraw = true; }
-				else if (key == "end") { pm_cmd_cursor = static_cast<int>(pm_edit_command.length()); redraw = true; }
+				if (key == "left" and pm_cmd_cursor > 0) { pm_cmd_cursor--; redraw = true; return false; }
+				else if (key == "right" and pm_cmd_cursor < static_cast<int>(pm_edit_command.length())) { pm_cmd_cursor++; redraw = true; return false; }
+				else if (key == "home") { pm_cmd_cursor = 0; redraw = true; return false; }
+				else if (key == "end") { pm_cmd_cursor = static_cast<int>(pm_edit_command.length()); redraw = true; return false; }
 				else if (key == "backspace" and pm_cmd_cursor > 0) {
 					pm_edit_command.erase(static_cast<size_t>(pm_cmd_cursor - 1), 1);
 					pm_cmd_cursor--;
 					redraw = true;
+					return false;
 				}
 				else if (key == "delete" and pm_cmd_cursor < static_cast<int>(pm_edit_command.length())) {
 					pm_edit_command.erase(static_cast<size_t>(pm_cmd_cursor), 1);
 					redraw = true;
+					return false;
 				}
 				else if (key == "space" and pm_edit_command.length() < 100) {
 					pm_edit_command.insert(static_cast<size_t>(pm_cmd_cursor), 1, ' ');
 					pm_cmd_cursor++;
 					redraw = true;
+					return false;
 				}
 				else if (key.length() == 1 and isprint(key[0]) and pm_edit_command.length() < 100) {
 					pm_edit_command.insert(static_cast<size_t>(pm_cmd_cursor), 1, key[0]);
 					pm_cmd_cursor++;
 					redraw = true;
+					return false;
 				}
-				return false;
 			}
 			else if (pm_editor_field == 1) {
-				if (key == "left" and pm_display_cursor > 0) { pm_display_cursor--; redraw = true; }
-				else if (key == "right" and pm_display_cursor < static_cast<int>(pm_edit_display.length())) { pm_display_cursor++; redraw = true; }
-				else if (key == "home") { pm_display_cursor = 0; redraw = true; }
-				else if (key == "end") { pm_display_cursor = static_cast<int>(pm_edit_display.length()); redraw = true; }
+				if (key == "left" and pm_display_cursor > 0) { pm_display_cursor--; redraw = true; return false; }
+				else if (key == "right" and pm_display_cursor < static_cast<int>(pm_edit_display.length())) { pm_display_cursor++; redraw = true; return false; }
+				else if (key == "home") { pm_display_cursor = 0; redraw = true; return false; }
+				else if (key == "end") { pm_display_cursor = static_cast<int>(pm_edit_display.length()); redraw = true; return false; }
 				else if (key == "backspace" and pm_display_cursor > 0) {
 					pm_edit_display.erase(static_cast<size_t>(pm_display_cursor - 1), 1);
 					pm_display_cursor--;
 					redraw = true;
+					return false;
 				}
 				else if (key == "delete" and pm_display_cursor < static_cast<int>(pm_edit_display.length())) {
 					pm_edit_display.erase(static_cast<size_t>(pm_display_cursor), 1);
 					redraw = true;
+					return false;
 				}
 				else if (key == "space" and pm_edit_display.length() < 30) {
 					pm_edit_display.insert(static_cast<size_t>(pm_display_cursor), 1, ' ');
 					pm_display_cursor++;
 					redraw = true;
+					return false;
 				}
 				else if (key.length() == 1 and isprint(key[0]) and pm_edit_display.length() < 30) {
 					pm_edit_display.insert(static_cast<size_t>(pm_display_cursor), 1, key[0]);
 					pm_display_cursor++;
 					redraw = true;
+					return false;
 				}
-				return false;
 			}
 			else if (pm_editor_field == 2) {
-				if (key == "left" and pm_path_cursor > 0) { pm_path_cursor--; redraw = true; }
-				else if (key == "right" and pm_path_cursor < static_cast<int>(pm_edit_path.length())) { pm_path_cursor++; redraw = true; }
-				else if (key == "home") { pm_path_cursor = 0; redraw = true; }
-				else if (key == "end") { pm_path_cursor = static_cast<int>(pm_edit_path.length()); redraw = true; }
+				if (key == "left" and pm_path_cursor > 0) { pm_path_cursor--; redraw = true; return false; }
+				else if (key == "right" and pm_path_cursor < static_cast<int>(pm_edit_path.length())) { pm_path_cursor++; redraw = true; return false; }
+				else if (key == "home") { pm_path_cursor = 0; redraw = true; return false; }
+				else if (key == "end") { pm_path_cursor = static_cast<int>(pm_edit_path.length()); redraw = true; return false; }
 				else if (key == "backspace" and pm_path_cursor > 0) {
 					pm_edit_path.erase(static_cast<size_t>(pm_path_cursor - 1), 1);
 					pm_path_cursor--;
 					redraw = true;
+					return false;
 				}
 				else if (key == "delete" and pm_path_cursor < static_cast<int>(pm_edit_path.length())) {
 					pm_edit_path.erase(static_cast<size_t>(pm_path_cursor), 1);
 					redraw = true;
+					return false;
 				}
 				else if (key == "space" and pm_edit_path.length() < 100) {
 					pm_edit_path.insert(static_cast<size_t>(pm_path_cursor), 1, ' ');
 					pm_path_cursor++;
 					redraw = true;
+					return false;
 				}
 				else if (key.length() == 1 and isprint(key[0]) and pm_edit_path.length() < 100) {
 					pm_edit_path.insert(static_cast<size_t>(pm_path_cursor), 1, key[0]);
 					pm_path_cursor++;
 					redraw = true;
+					return false;
 				}
-				return false;
 			}
 			else if (pm_editor_field == 3) {
+				if (is_in(key, "left", "h")) {
+					pm_edit_log_display = 0;
+					redraw = true;
+					return false;
+				}
+				else if (is_in(key, "right", "l")) {
+					pm_edit_log_display = 1;
+					redraw = true;
+					return false;
+				}
+				else if (is_in(key, "space", "enter")) {
+					pm_edit_log_display = (pm_edit_log_display + 1) % 2;
+					redraw = true;
+					return false;
+				}
+			}
+			else if (pm_editor_field == 4) {
 				if (is_in(key, "space", "enter")) {
 					pm_edit_tagged = not pm_edit_tagged;
 					redraw = true;
+					return false;
 				}
-				return false;
 			}
-			else if (pm_editor_field == 4) {
+			else if (pm_editor_field == 5) {
 				if (pm_edit_tagged) {
 					if (is_in(key, "left", "h")) {
 						pm_edit_color_idx = (pm_edit_color_idx - 1 + 6) % 6;
 						redraw = true;
+						return false;
 					}
 					else if (is_in(key, "right", "l")) {
 						pm_edit_color_idx = (pm_edit_color_idx + 1) % 6;
 						redraw = true;
+						return false;
 					}
 					else if (key.length() == 1 and key[0] >= '1' and key[0] <= '6') {
 						pm_edit_color_idx = key[0] - '1';
 						redraw = true;
+						return false;
 					}
 				}
-				return false;
 			}
-			else if (pm_editor_field == 5) {
+			else if (pm_editor_field == 6) {
 				if (is_in(key, "left", "h")) {
 					pm_editor_button = (pm_editor_button - 1 + 3) % 3;
 					redraw = true;
@@ -5432,6 +5479,7 @@ namespace Logs {
 						cfg.command = pm_edit_command;
 						cfg.display_name = pm_edit_display;
 						cfg.log_path = pm_edit_path;
+						cfg.log_display = (pm_edit_log_display == 1) ? "application" : "system";
 						cfg.tagged = pm_edit_tagged;
 						cfg.tag_color = pm_edit_tagged ? string(TagColors::themes[static_cast<size_t>(pm_edit_color_idx)]) : "";
 						if (not pm_edit_original_cmd.empty() and pm_edit_command != pm_edit_original_cmd) {
@@ -5469,71 +5517,84 @@ namespace Logs {
 				}
 			}
 
-			if (key == "pm_edit_panel") {
+		}
+
+		//? Mouse handlers - must be OUTSIDE the if/else block to work regardless of panel focus
+		if (key == "pm_edit_panel") {
+			pm_panel_focus = 1;
+			redraw = true;
+			return false;
+		}
+		if (key.starts_with("pm_field_")) {
+			int field = key.back() - '0';
+			if (field >= 0 and field <= 6) {
 				pm_panel_focus = 1;
+				pm_editor_field = field;
+				if (field == 4) pm_edit_tagged = not pm_edit_tagged;
 				redraw = true;
-				return false;
 			}
-			if (key.starts_with("pm_field_")) {
-				int field = key.back() - '0';
-				if (field >= 0 and field <= 5) {
-					pm_panel_focus = 1;
-					pm_editor_field = field;
-					if (field == 3) pm_edit_tagged = not pm_edit_tagged;
+			return false;
+		}
+		if (key.starts_with("pm_logdisp_")) {
+			int opt = key.back() - '0';
+			if (opt >= 0 and opt <= 1) {
+				pm_panel_focus = 1;
+				pm_editor_field = 3;
+				pm_edit_log_display = opt;
+				redraw = true;
+			}
+			return false;
+		}
+		if (key.starts_with("pm_color_")) {
+			int color = key.back() - '0';
+			if (color >= 0 and color <= 5 and pm_edit_tagged) {
+				pm_panel_focus = 1;
+				pm_edit_color_idx = color;
+				pm_editor_field = 5;
+				redraw = true;
+			}
+			return false;
+		}
+		if (key.starts_with("pm_btn_")) {
+			int btn = key.back() - '0';
+			if (btn >= 0 and btn <= 2) {
+				pm_panel_focus = 1;
+				pm_editor_field = 6;
+				pm_editor_button = btn;
+				if (btn == 0) {
+					Config::ProcessLogConfig cfg;
+					cfg.name = pm_edit_name;
+					cfg.command = pm_edit_command;
+					cfg.display_name = pm_edit_display;
+					cfg.log_path = pm_edit_path;
+					cfg.log_display = (pm_edit_log_display == 1) ? "application" : "system";
+					cfg.tagged = pm_edit_tagged;
+					cfg.tag_color = pm_edit_tagged ? string(TagColors::themes[static_cast<size_t>(pm_edit_color_idx)]) : "";
+					if (pm_edit_command != pm_edit_original_cmd) {
+						Config::remove_process_config(pm_edit_name, pm_edit_original_cmd);
+					}
+					Config::save_process_config(cfg);
+					pm_load_selected_config();
 					redraw = true;
+					Proc::redraw = true;
 				}
-				return false;
-			}
-			if (key.starts_with("pm_color_")) {
-				int color = key.back() - '0';
-				if (color >= 0 and color <= 5 and pm_edit_tagged) {
-					pm_panel_focus = 1;
-					pm_edit_color_idx = color;
-					pm_editor_field = 4;
+				else if (btn == 1) {
+					Config::remove_process_config(pm_edit_name, pm_edit_command);
+					if (pm_list_selected >= static_cast<int>(Config::logging.processes.size())) {
+						pm_list_selected = std::max(0, static_cast<int>(Config::logging.processes.size()) - 1);
+					}
+					pm_load_selected_config();
 					redraw = true;
+					Proc::redraw = true;
 				}
-				return false;
-			}
-			if (key.starts_with("pm_btn_")) {
-				int btn = key.back() - '0';
-				if (btn >= 0 and btn <= 2) {
-					pm_panel_focus = 1;
-					pm_editor_field = 5;
-					pm_editor_button = btn;
-					if (btn == 0) {
-						Config::ProcessLogConfig cfg;
-						cfg.name = pm_edit_name;
-						cfg.command = pm_edit_command;
-						cfg.display_name = pm_edit_display;
-						cfg.log_path = pm_edit_path;
-						cfg.tagged = pm_edit_tagged;
-						cfg.tag_color = pm_edit_tagged ? string(TagColors::themes[static_cast<size_t>(pm_edit_color_idx)]) : "";
-						if (pm_edit_command != pm_edit_original_cmd) {
-							Config::remove_process_config(pm_edit_name, pm_edit_original_cmd);
-						}
-						Config::save_process_config(cfg);
-						pm_load_selected_config();
-						redraw = true;
-						Proc::redraw = true;
-					}
-					else if (btn == 1) {
-						Config::remove_process_config(pm_edit_name, pm_edit_command);
-						if (pm_list_selected >= static_cast<int>(Config::logging.processes.size())) {
-							pm_list_selected = std::max(0, static_cast<int>(Config::logging.processes.size()) - 1);
-						}
-						pm_load_selected_config();
-						redraw = true;
-						Proc::redraw = true;
-					}
-					else if (btn == 2) {
-						process_manager_active = false;
-						redraw = true;
-						Proc::redraw = true;
-						return true;
-					}
+				else if (btn == 2) {
+					process_manager_active = false;
+					redraw = true;
+					Proc::redraw = true;
+					return true;
 				}
-				return false;
 			}
+			return false;
 		}
 
 		return false;
@@ -5703,19 +5764,37 @@ namespace Logs {
 		ed_y++;
 
 		draw_text_field(2, "LogPath", pm_edit_path, pm_path_cursor, right_w - 14);
+		ed_y++;
+
+		bool logdisp_sel = field_focus and pm_editor_field == 3;
+		out += Mv::to(ed_y, ed_x) + theme("main_fg") + "Log View:";
+		int radio_x = ed_x + 10;
+		bool sys_sel = logdisp_sel and pm_edit_log_display == 0;
+		bool app_sel = logdisp_sel and pm_edit_log_display == 1;
+		out += Mv::to(ed_y, radio_x);
+		if (sys_sel) out += theme("selected_bg") + theme("selected_fg");
+		out += (pm_edit_log_display == 0 ? "●" : "○") + Fx::reset + " ";
+		out += theme("main_fg") + "System ";
+		Input::mouse_mappings["pm_logdisp_0"] = {ed_y, radio_x, 1, 8};
+		radio_x += 9;
+		if (app_sel) out += theme("selected_bg") + theme("selected_fg");
+		out += (pm_edit_log_display == 1 ? "●" : "○") + Fx::reset + " ";
+		out += theme("main_fg") + "Application";
+		Input::mouse_mappings["pm_logdisp_1"] = {ed_y, radio_x, 1, 13};
+		Input::mouse_mappings["pm_field_3"] = {ed_y, ed_x, 1, 10};
 		ed_y += 2;
 
-		bool tagged_sel = field_focus and pm_editor_field == 3;
+		bool tagged_sel = field_focus and pm_editor_field == 4;
 		out += Mv::to(ed_y, ed_x) + theme("main_fg") + "Tagged:  ";
 		if (tagged_sel) out += theme("selected_bg") + theme("selected_fg");
 		out += "[" + string(pm_edit_tagged ? "x" : " ") + "]" + Fx::reset;
 		out += theme("inactive_fg") + " (highlight in list)";
-		Input::mouse_mappings["pm_field_3"] = {ed_y, ed_x + 9, 1, 3};
+		Input::mouse_mappings["pm_field_4"] = {ed_y, ed_x + 9, 1, 3};
 		ed_y += 2;
 
-		bool color_sel = field_focus and pm_editor_field == 4;
+		bool color_sel = field_focus and pm_editor_field == 5;
 		out += Mv::to(ed_y, ed_x) + theme("main_fg") + "Color:   ";
-		Input::mouse_mappings["pm_field_4"] = {ed_y, ed_x, 1, 9};
+		Input::mouse_mappings["pm_field_5"] = {ed_y, ed_x, 1, 9};
 		if (not pm_edit_tagged) {
 			out += theme("inactive_fg") + "(enable Tagged first)";
 			for (int i = 0; i < 6; i++) Input::mouse_mappings.erase("pm_color_" + to_string(i));
@@ -5739,7 +5818,7 @@ namespace Logs {
 		const array<string, 3> buttons = {"Save", "Remove", "Cancel"};
 		int btn_x = ed_x;
 		for (size_t i = 0; i < 3; i++) {
-			bool btn_sel = field_focus and pm_editor_field == 5 and pm_editor_button == static_cast<int>(i);
+			bool btn_sel = field_focus and pm_editor_field == 6 and pm_editor_button == static_cast<int>(i);
 			if (btn_sel) {
 				out += theme("selected_bg") + theme("selected_fg") + Fx::b;
 			} else {

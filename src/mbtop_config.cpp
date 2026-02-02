@@ -1568,6 +1568,8 @@ namespace Config {
 								}
 								if (auto val = (*tbl)["log_path"].value<string>())
 									cfg.log_path = expand_path(*val);
+								if (auto val = (*tbl)["log_display"].value<string>())
+									cfg.log_display = *val;
 								if (auto val = (*tbl)["display_name"].value<string>())
 									cfg.display_name = *val;
 								if (auto val = (*tbl)["tagged"].value<bool>())
@@ -1670,6 +1672,8 @@ namespace Config {
 						proc.insert("command_pattern", cfg.command_pattern);
 					if (!cfg.log_path.empty())
 						proc.insert("log_path", collapse_path(cfg.log_path));
+					if (!cfg.log_display.empty())
+						proc.insert("log_display", cfg.log_display);
 					if (!cfg.display_name.empty())
 						proc.insert("display_name", cfg.display_name);
 					if (cfg.tagged)
@@ -1990,6 +1994,8 @@ namespace Config {
 							}
 							if (auto val = (*tbl)["log_path"].value<string>())
 								cfg.log_path = expand_path(*val);
+							if (auto val = (*tbl)["log_display"].value<string>())
+								cfg.log_display = *val;
 							if (auto val = (*tbl)["display_name"].value<string>())
 								cfg.display_name = *val;
 							if (auto val = (*tbl)["tagged"].value<bool>())

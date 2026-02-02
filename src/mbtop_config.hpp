@@ -46,6 +46,7 @@ namespace Config {
 		string command;           // Exact command line (default matching)
 		string command_pattern;   // Optional regex for cmdline (power users, overrides exact match)
 		string log_path;          // Path to log file (optional - for app logs)
+		string log_display;       // Preferred log source: "system", "application", or empty (use default)
 		string display_name;      // Custom display name (optional)
 		bool tagged = false;      // Visual highlighting in process list
 		string tag_color;         // Theme color name (optional, requires tagged=true)
