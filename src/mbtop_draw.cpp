@@ -4813,6 +4813,10 @@ namespace Logs {
 	string custom_tag_color;             //? Tag color from config
 	string current_cmdline;              //? Command line of current process
 
+	bool toast_active = false;
+	uint64_t toast_time = 0;
+	string toast_message;
+
 	//=== Process Manager Modal State ===
 	bool process_manager_active = false;
 	int pm_list_selected = 0;
@@ -5155,6 +5159,26 @@ namespace Logs {
 		pm_cmd_cursor = static_cast<int>(pm_edit_command.length());
 		pm_display_cursor = static_cast<int>(pm_edit_display.length());
 		pm_path_cursor = static_cast<int>(pm_edit_path.length());
+	}
+
+	bool copy_to_clipboard() {
+		if (entries.empty()) return false;
+
+		string text;
+		text.reserve(entries.size() * 100);
+
+		for (const auto& entry : entries) {
+			text += "[" + entry.level.substr(0, 1) + "] (" + entry.timestamp + ") " + entry.message + "\n";
+		}
+
+		if (Tools::copy_to_clipboard(text)) {
+			toast_active = true;
+			toast_time = Tools::time_ms();
+			toast_message = "Copied " + to_string(entries.size()) + " log entries!";
+			redraw = true;
+			return true;
+		}
+		return false;
 	}
 
 	void show_process_manager(const string& auto_select_name, const string& auto_select_cmd) {
@@ -6400,6 +6424,17 @@ namespace Logs {
 
 			//? Note: Color picker and config modals are now drawn in Proc::draw()
 			//? since they use Proc panel coordinates and should work even when Logs is hidden
+
+			if (toast_active) {
+				if (Tools::time_ms() - toast_time > 1500) {
+					toast_active = false;
+				} else {
+					int toast_w = static_cast<int>(toast_message.length()) + 4;
+					int toast_x = x + (width - toast_w) / 2;
+					int toast_y = y + height / 2;
+					out += Mv::to(toast_y, toast_x) + theme("hi_fg") + Fx::b + "[ " + toast_message + " ]" + Fx::reset;
+				}
+			}
 
 			redraw = false;
 			return out + Fx::reset;

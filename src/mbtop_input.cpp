@@ -613,12 +613,18 @@ namespace Input {
 					}
 				}
 
-				//? Mouse click in logs area - set focus
+				//? Mouse click in logs area - set focus + double-click to copy
+				static uint64_t last_logs_click_time = 0;
 				if (key == "mouse_click") {
 					if (mouse_pos[0] >= Logs::x and mouse_pos[0] < Logs::x + Logs::width
 						and mouse_pos[1] >= Logs::y and mouse_pos[1] < Logs::y + Logs::height) {
-						//? Clicked in Logs panel - set focus
-						if (not Logs::focused) {
+						uint64_t now = Tools::time_ms();
+						bool is_double_click = (now - last_logs_click_time < DOUBLE_CLICK_MS);
+						last_logs_click_time = now;
+
+						if (is_double_click) {
+							Logs::copy_to_clipboard();
+						} else if (not Logs::focused) {
 							Logs::focused = true;
 							Logs::redraw = true;
 						}

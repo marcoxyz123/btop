@@ -720,6 +720,13 @@ namespace Logs {
 	//* Handle error modal input (any key closes it)
 	bool error_modal_input(const std::string_view key);
 
+	//* Copy log buffer to clipboard, returns true on success
+	bool copy_to_clipboard();
+
+	extern bool toast_active;
+	extern uint64_t toast_time;
+	extern string toast_message;
+
 	//=== Process Manager Modal State (2-panel dialog) ===
 	extern bool process_manager_active;
 	extern int pm_list_selected;           //? Selected index in left panel (process list)
