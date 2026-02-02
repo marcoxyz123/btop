@@ -225,11 +225,23 @@ namespace Input {
 		if (key.empty()) return;
 		try {
 			//? Handle Logs modals FIRST - they must capture ALL input before global handlers
-			if (Logs::config_modal_active) {
-				Logs::config_modal_input(key);
+			if (Logs::process_manager_active) {
+				if (key == "pm_close") {
+					Logs::process_manager_active = false;
+					Logs::redraw = true;
+					Proc::redraw = true;
+				} else if (key == "pm_new") {
+					Logs::pm_adding_new = true;
+					Logs::pm_new_name_input.clear();
+					Logs::pm_newname_cursor = 0;
+					Logs::redraw = true;
+				} else {
+					Logs::process_manager_input(key);
+				}
 				Runner::run("all", true, true);
 				return;
 			}
+
 			if (Logs::color_modal_active) {
 				if (Logs::color_modal_input(key)) {
 					Runner::run("all", true, true);
@@ -582,7 +594,7 @@ namespace Input {
 				bool keep_going = false;
 				bool redraw = true;
 
-				//? Note: config_modal, color_modal, error_modal are now handled at the top of process()
+				//? Note: process_manager, color_modal, error_modal are now handled at the top of process()
 				//? to ensure they capture input before global handlers (like 'o' for Options menu)
 
 				//? Handle filter modal input if active
@@ -601,12 +613,18 @@ namespace Input {
 					}
 				}
 
-				//? Mouse click in logs area - set focus
+				//? Mouse click in logs area - set focus + double-click to copy
+				static uint64_t last_logs_click_time = 0;
 				if (key == "mouse_click") {
 					if (mouse_pos[0] >= Logs::x and mouse_pos[0] < Logs::x + Logs::width
 						and mouse_pos[1] >= Logs::y and mouse_pos[1] < Logs::y + Logs::height) {
-						//? Clicked in Logs panel - set focus
-						if (not Logs::focused) {
+						uint64_t now = Tools::time_ms();
+						bool is_double_click = (now - last_logs_click_time < DOUBLE_CLICK_MS);
+						last_logs_click_time = now;
+
+						if (is_double_click) {
+							Logs::copy_to_clipboard();
+						} else if (not Logs::focused) {
 							Logs::focused = true;
 							Logs::redraw = true;
 						}
@@ -658,6 +676,13 @@ namespace Input {
 				else if (key == "logs_source") {
 					Logs::toggle_source();
 				}
+				else if (key == "logs_copy_fmt") {
+					Config::logging.copy_format = (Config::logging.copy_format == "raw") ? "mbtop" : "raw";
+					Logs::toast_active = true;
+					Logs::toast_time = Tools::time_ms();
+					Logs::toast_message = "Copy format: " + Config::logging.copy_format;
+					Logs::redraw = true;
+				}
 				//? Color picker modal clicks
 				else if (key == "color_0" or key == "color_1" or key == "color_2" or key == "color_3" or key == "color_4" or key == "color_5") {
 					if (Logs::color_modal_active) {
@@ -697,6 +722,13 @@ namespace Input {
 					else if (key == "B") {
 						//? Shift+B = Show buffer size modal
 						Logs::show_buffer_modal();
+					}
+					else if (key == "C") {
+						Config::logging.copy_format = (Config::logging.copy_format == "raw") ? "mbtop" : "raw";
+						Logs::toast_active = true;
+						Logs::toast_time = Tools::time_ms();
+						Logs::toast_message = "Copy format: " + Config::logging.copy_format;
+						Logs::redraw = true;
 					}
 					else if (key == "page_up") {
 						//? Scroll up (towards older entries) with upper bound
@@ -1023,10 +1055,21 @@ namespace Input {
 				    Menu::show(Menu::Menus::Renice);
 				    return;
 			    }
-				//? Open Log Config modal (L key)
-				else if (key == "L" and Config::getB("show_detailed") and Config::getI("proc_selected") == 0) {
-					if (Proc::detailed.status == "Dead") return;
-					Logs::show_config_modal(Proc::detailed.entry.name, Proc::detailed.entry.cmd);
+				//? Open Process Manager modal (L key)
+				else if (key == "L") {
+					if (Config::getB("follow_process") and Config::getI("followed_pid") > 0) {
+						if (Config::getI("followed_pid") == Config::getI("detailed_pid") and Proc::detailed.status != "Dead") {
+							Logs::show_process_manager(Proc::detailed.entry.name, Proc::detailed.entry.cmd);
+						} else if (not Logs::current_name.empty()) {
+							Logs::show_process_manager(Logs::current_name, Logs::current_cmdline);
+						} else {
+							Logs::show_process_manager();
+						}
+					} else if (Config::getB("show_detailed") and Config::getI("proc_selected") == 0 and Proc::detailed.status != "Dead") {
+						Logs::show_process_manager(Proc::detailed.entry.name, Proc::detailed.entry.cmd);
+					} else {
+						Logs::show_process_manager();
+					}
 					Runner::run("all", true, true);
 					return;
 				}

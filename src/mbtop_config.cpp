@@ -263,6 +263,8 @@ namespace Config {
 
 		{"log_default_source",	"#* Default log source when viewing process logs: \"system\" for macOS unified logs, \"application\" for app log files."},
 
+		{"log_copy_format",		"#* Format for copying logs to clipboard: \"mbtop\" for compact format, \"raw\" for full details."},
+
 		{"stacked_layout",		"#* Force fully stacked vertical layout: MEM full width, NET full width below, PROC full width at bottom."},
 
 		{"zfs_arc_cached",		"#* Count ZFS ARC in cached and available memory."},
@@ -392,6 +394,7 @@ namespace Config {
 		{"log_level", "WARNING"},
 		{"log_export_path", ""},
 		{"log_default_source", "system"},
+		{"log_copy_format", "mbtop"},
 		{"proc_filter", ""},
 		{"selected_name", ""},
 		{"selected_cmd", ""},
@@ -1528,6 +1531,8 @@ namespace Config {
 					logging.export_path = expand_path(*val);
 				if (auto val = log_section["log_default_source"].value<string>())
 					logging.default_source = *val;
+				if (auto val = log_section["log_copy_format"].value<string>())
+					logging.copy_format = *val;
 				if (auto val = log_section["log_buffer_size"].value<int64_t>())
 					logging.buffer_size = static_cast<int>(*val);
 				if (auto val = log_section["log_color_full_line"].value<bool>())
@@ -1568,6 +1573,8 @@ namespace Config {
 								}
 								if (auto val = (*tbl)["log_path"].value<string>())
 									cfg.log_path = expand_path(*val);
+								if (auto val = (*tbl)["log_display"].value<string>())
+									cfg.log_display = *val;
 								if (auto val = (*tbl)["display_name"].value<string>())
 									cfg.display_name = *val;
 								if (auto val = (*tbl)["tagged"].value<bool>())
@@ -1588,6 +1595,7 @@ namespace Config {
 			strings.at("log_level") = logging.level;
 			strings.at("log_export_path") = logging.export_path;
 			strings.at("log_default_source") = logging.default_source;
+			strings.at("log_copy_format") = logging.copy_format;
 			bools.at("log_color_full_line") = logging.color_full_line;
 			bools.at("logs_below_proc") = logging.below_proc;
 			ints.at("log_buffer_size") = logging.buffer_size;
@@ -1670,6 +1678,8 @@ namespace Config {
 						proc.insert("command_pattern", cfg.command_pattern);
 					if (!cfg.log_path.empty())
 						proc.insert("log_path", collapse_path(cfg.log_path));
+					if (!cfg.log_display.empty())
+						proc.insert("log_display", cfg.log_display);
 					if (!cfg.display_name.empty())
 						proc.insert("display_name", cfg.display_name);
 					if (cfg.tagged)
@@ -1990,6 +2000,8 @@ namespace Config {
 							}
 							if (auto val = (*tbl)["log_path"].value<string>())
 								cfg.log_path = expand_path(*val);
+							if (auto val = (*tbl)["log_display"].value<string>())
+								cfg.log_display = *val;
 							if (auto val = (*tbl)["display_name"].value<string>())
 								cfg.display_name = *val;
 							if (auto val = (*tbl)["tagged"].value<bool>())

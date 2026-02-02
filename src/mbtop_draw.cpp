@@ -4725,14 +4725,14 @@ namespace Proc {
 			selected_cmd.clear();
 		}
 
-		//? Draw Logs modals (color picker and config) - they use Proc panel coordinates
-		//? This allows them to work even when Logs panel is not shown
+		//? Draw Logs modals (process manager, color picker, config) - they use Proc panel coordinates
+		if (Logs::process_manager_active) {
+			out += Logs::draw_process_manager();
+		}
 		if (Logs::color_modal_active) {
 			out += Logs::draw_color_modal();
 		}
-		if (Logs::config_modal_active) {
-			out += Logs::draw_config_modal();
-		}
+
 
 		//? Show one-time MCP error modal if socket is in use by another instance
 		if (Socket::mcp_unavailable.load() and not mcp_error_shown) {
@@ -4813,26 +4813,45 @@ namespace Logs {
 	string custom_tag_color;             //? Tag color from config
 	string current_cmdline;              //? Command line of current process
 
-	//=== Log Config Modal State ===
-	bool config_modal_active = false;
-	string config_modal_name;
-	string config_modal_cmdline;         //? Editable command (supports wildcards)
-	string config_modal_original_cmd;    //? Original command for removal
-	string config_modal_display;
-	string config_modal_path;
-	int config_modal_cmd_cursor = 0;      //? Cursor position in command field
-	int config_modal_display_cursor = 0;  //? Cursor position in display field
-	int config_modal_path_cursor = 0;     //? Cursor position in path field
-	bool config_modal_tagged = false;
-	int config_modal_color_idx = 3;   //? Default to green (index 3)
-	int config_modal_field = 0;       //? 0=command, 1=display, 2=path, 3=tagged, 4=color, 5=buttons
-	int config_modal_button = 0;      //? 0=Save, 1=Remove, 2=Cancel, 3=Clear All
+	bool toast_active = false;
+	uint64_t toast_time = 0;
+	string toast_message;
+
+	//=== Process Manager Modal State ===
+	bool process_manager_active = false;
+	int pm_list_selected = 0;
+	int pm_list_scroll = 0;
+	int pm_panel_focus = 0;
+	int pm_editor_field = 0;
+	int pm_editor_button = 0;
+	bool pm_adding_new = false;
+	string pm_new_name_input;
+
+	string pm_edit_name;
+	string pm_edit_command;
+	string pm_edit_display;
+	string pm_edit_path;
+	int pm_edit_log_display = 0;      // 0 = System, 1 = Application
+	bool pm_edit_tagged = false;
+	int pm_edit_color_idx = 3;
+	string pm_edit_original_cmd;
+
+	int pm_cmd_cursor = 0;
+	int pm_display_cursor = 0;
+	int pm_path_cursor = 0;
+	int pm_newname_cursor = 0;
+	int pm_editor_scroll = 0;
 
 	//=== Color Picker Modal State ===
 	bool color_modal_active = false;
 	string color_modal_name;
 	string color_modal_cmdline;
 	int color_modal_selected = 3;     //? Default to green (index 3)
+
+	//=== Toast Notification State ===
+	bool pm_toast_active = false;
+	uint64_t pm_toast_time = 0;
+	string pm_toast_message;
 
 	//? Get filter name based on current filter
 	//? Bitmask: Default=0x01, Info=0x02, Debug=0x04, Error=0x08, Fault=0x10
@@ -4907,11 +4926,14 @@ namespace Logs {
 		custom_display_name.clear();
 		custom_tag_color.clear();
 
+		string preferred_source;
+
 		//? Look up config
 		if (auto cfg = Config::find_process_config(name, cmdline)) {
 			app_log_path = cfg->log_path;
 			custom_display_name = cfg->display_name;
 			custom_tag_color = cfg->tag_color;
+			preferred_source = cfg->log_display;
 
 			//? Expand ~ to home directory
 			if (!app_log_path.empty() && app_log_path[0] == '~') {
@@ -4928,9 +4950,15 @@ namespace Logs {
 			}
 		}
 
-		//? Set source based on config default and availability
-		if (Config::logging.default_source == "application" && app_log_available) {
+		//? Set source: per-process preference > app available > global default > system
+		if (preferred_source == "system") {
+			source = Source::System;
+		} else if (preferred_source == "application" and app_log_available) {
 			source = Source::Application;
+		} else if (app_log_available) {
+			source = Source::Application;
+		} else if (Config::logging.default_source == "application") {
+			source = Source::System;
 		} else {
 			source = Source::System;
 		}
@@ -5089,487 +5117,856 @@ namespace Logs {
 		return out;
 	}
 
-	//=== Log Config Modal Functions ===
-
-	void show_config_modal(const string& name, const string& cmdline) {
-		config_modal_active = true;
-		config_modal_name = name;
-		config_modal_original_cmd = cmdline;  //? Save original for removal
-		config_modal_cmdline = cmdline;       //? Editable command
-		config_modal_field = 0;
-		config_modal_button = 0;
-
-		//? Load existing config if any
-		if (auto cfg = Config::find_process_config(name, cmdline)) {
-			//? Use saved command pattern (may include wildcards)
-			if (!cfg->command.empty()) {
-				config_modal_cmdline = cfg->command;
-				config_modal_original_cmd = cfg->command;  //? Track original pattern for removal
-			}
-			config_modal_display = cfg->display_name;
-			config_modal_path = cfg->log_path;
-			config_modal_tagged = cfg->tagged;
-			//? Find color index
-			config_modal_color_idx = 3;  //? Default green
-			for (size_t i = 0; i < TagColors::themes.size(); i++) {
-				if (TagColors::themes[i] == cfg->tag_color) {
-					config_modal_color_idx = static_cast<int>(i);
-					break;
-				}
-			}
-		} else {
-			config_modal_display.clear();
-			config_modal_path.clear();
-			config_modal_tagged = false;
-			config_modal_color_idx = 3;
+	void pm_load_selected_config() {
+		const auto& processes = Config::logging.processes;
+		pm_editor_scroll = 0;
+		if (pm_list_selected < 0 or pm_list_selected >= static_cast<int>(processes.size())) {
+			pm_edit_name.clear();
+			pm_edit_command.clear();
+			pm_edit_display.clear();
+			pm_edit_path.clear();
+			pm_edit_log_display = 0;
+			pm_edit_tagged = false;
+			pm_edit_color_idx = 3;
+			pm_edit_original_cmd.clear();
+			pm_cmd_cursor = 0;
+			pm_display_cursor = 0;
+			pm_path_cursor = 0;
+			return;
 		}
-		//? Set cursors to end of text
-		config_modal_cmd_cursor = static_cast<int>(config_modal_cmdline.length());
-		config_modal_display_cursor = static_cast<int>(config_modal_display.length());
-		config_modal_path_cursor = static_cast<int>(config_modal_path.length());
-		redraw = true;
+
+		const auto& cfg = processes[static_cast<size_t>(pm_list_selected)];
+		pm_edit_name = cfg.name;
+		pm_edit_command = cfg.command;
+		pm_edit_original_cmd = cfg.command;
+		pm_edit_display = cfg.display_name;
+		pm_edit_path = cfg.log_path;
+		if (cfg.log_display == "application") {
+			pm_edit_log_display = 1;
+		} else if (cfg.log_display == "system") {
+			pm_edit_log_display = 0;
+		} else {
+			pm_edit_log_display = cfg.log_path.empty() ? 0 : 1;
+		}
+		pm_edit_tagged = cfg.tagged;
+		pm_edit_color_idx = 3;
+		for (size_t i = 0; i < TagColors::themes.size(); i++) {
+			if (TagColors::themes[i] == cfg.tag_color) {
+				pm_edit_color_idx = static_cast<int>(i);
+				break;
+			}
+		}
+		pm_cmd_cursor = static_cast<int>(pm_edit_command.length());
+		pm_display_cursor = static_cast<int>(pm_edit_display.length());
+		pm_path_cursor = static_cast<int>(pm_edit_path.length());
 	}
 
-	bool config_modal_input(const std::string_view key) {
-		if (key == "escape") {
-			config_modal_active = false;
+	bool copy_to_clipboard() {
+		if (entries.empty()) return false;
+
+		string text;
+		text.reserve(entries.size() * 150);
+
+		bool raw_format = (Config::logging.copy_format == "raw");
+
+		for (const auto& entry : entries) {
+			if (raw_format) {
+				text += entry.timestamp + " [" + entry.level + "] ";
+				if (not entry.subsystem.empty()) text += entry.subsystem;
+				if (not entry.category.empty()) text += "/" + entry.category;
+				text += ": " + entry.message + "\n";
+			} else {
+				text += "[" + entry.level.substr(0, 1) + "] (" + entry.timestamp + ") " + entry.message + "\n";
+			}
+		}
+
+		if (Tools::copy_to_clipboard(text)) {
+			toast_active = true;
+			toast_time = Tools::time_ms();
+			toast_message = "Copied " + to_string(entries.size()) + " entries (" + Config::logging.copy_format + ")";
 			redraw = true;
 			return true;
 		}
+		return false;
+	}
 
-		//? Mouse click on field - select it
-		if (key.starts_with("config_field_")) {
-			int field_idx = key.back() - '0';
-			if (field_idx >= 0 && field_idx <= 3) {
-				config_modal_field = field_idx;
-				//? For tagged checkbox, also toggle on click
-				if (field_idx == 3) {
-					config_modal_tagged = !config_modal_tagged;
+	void show_process_manager(const string& auto_select_name, const string& auto_select_cmd) {
+		process_manager_active = true;
+		pm_panel_focus = 0;
+		pm_editor_field = 0;
+		pm_editor_button = 0;
+		pm_adding_new = false;
+		pm_new_name_input.clear();
+		pm_newname_cursor = 0;
+		pm_list_scroll = 0;
+		pm_editor_scroll = 0;
+
+		const auto& processes = Config::logging.processes;
+		pm_list_selected = 0;
+		bool found_match = false;
+
+		if (not auto_select_name.empty()) {
+			auto matched_cfg = Config::find_process_config(auto_select_name, auto_select_cmd);
+			if (matched_cfg) {
+				for (size_t i = 0; i < processes.size(); i++) {
+					const auto& cfg = processes[i];
+					if (cfg.name == matched_cfg->name and cfg.command == matched_cfg->command) {
+						pm_list_selected = static_cast<int>(i);
+						found_match = true;
+						break;
+					}
 				}
+			}
+		}
+
+		if (found_match or auto_select_name.empty()) {
+			pm_load_selected_config();
+		} else {
+			pm_edit_name = auto_select_name;
+			pm_edit_command = auto_select_cmd;
+			pm_edit_original_cmd.clear();
+			pm_edit_display.clear();
+			pm_edit_path.clear();
+			pm_edit_log_display = 0;
+			pm_edit_tagged = false;
+			pm_edit_color_idx = 3;
+			pm_cmd_cursor = static_cast<int>(pm_edit_command.length());
+			pm_display_cursor = 0;
+			pm_path_cursor = 0;
+			pm_list_selected = -1;
+			pm_panel_focus = 1;
+		}
+		redraw = true;
+		Proc::redraw = true;
+	}
+
+	bool process_manager_input(const std::string_view key) {
+		if (pm_toast_active) {
+			pm_toast_active = false;
+			Input::mouse_mappings.erase("pm_toast_dismiss");
+			redraw = true;
+		}
+
+		const auto& processes = Config::logging.processes;
+		const int list_count = static_cast<int>(processes.size());
+
+		if (key == "escape") {
+			if (pm_adding_new) {
+				pm_adding_new = false;
+				pm_new_name_input.clear();
+				pm_newname_cursor = 0;
 				redraw = true;
 				return false;
 			}
-		}
-
-		//? Mouse click on color
-		if (key.starts_with("config_color_") && config_modal_tagged) {
-			int color_idx = key.back() - '0';
-			if (color_idx >= 0 && color_idx <= 5) {
-				config_modal_field = 4;
-				config_modal_color_idx = color_idx;
+			if (pm_panel_focus == 1) {
+				pm_panel_focus = 0;
 				redraw = true;
 				return false;
 			}
-		}
-
-		//? Mouse click on button - select and activate
-		if (key.starts_with("config_btn_")) {
-			int btn_idx = key.back() - '0';
-			if (btn_idx >= 0 && btn_idx <= 3) {
-				config_modal_field = 5;
-				config_modal_button = btn_idx;
-				//? Activate the button immediately
-				if (btn_idx == 0) {
-					//? Save
-					Config::ProcessLogConfig cfg;
-					cfg.name = config_modal_name;
-					cfg.command = config_modal_cmdline;  //? Store command (may include wildcards)
-					cfg.display_name = config_modal_display;
-					cfg.log_path = config_modal_path;
-					cfg.tagged = config_modal_tagged;
-					cfg.tag_color = config_modal_tagged ? string(TagColors::themes[static_cast<size_t>(config_modal_color_idx)]) : "";
-					//? Remove old config if command changed
-					if (config_modal_cmdline != config_modal_original_cmd) {
-						Config::remove_process_config(config_modal_name, config_modal_original_cmd);
-					}
-					Config::save_process_config(cfg);
-					config_modal_active = false;
-					redraw = true;
-					Proc::redraw = true;  //? Refresh header Log dots
-					return true;
-				} else if (btn_idx == 1) {
-					//? Remove - use the command pattern shown in modal (not original cmdline)
-					Config::remove_process_config(config_modal_name, config_modal_cmdline);
-					config_modal_active = false;
-					redraw = true;
-					Proc::redraw = true;  //? Refresh header Log dots
-					return true;
-				} else if (btn_idx == 2) {
-					//? Cancel
-					config_modal_active = false;
-					redraw = true;
-					Proc::redraw = true;  //? Refresh display
-					return true;
-				} else {
-					//? Clear All - remove ALL process configs
-					Config::clear_all_process_configs();
-					config_modal_active = false;
-					redraw = true;
-					Proc::redraw = true;  //? Refresh display
-					return true;
-				}
-			}
-		}
-
-		//? Tab/Shift+Tab to cycle fields
-		if (key == "tab" || key == "down") {
-			config_modal_field = (config_modal_field + 1) % 6;
+			process_manager_active = false;
 			redraw = true;
+			Proc::redraw = true;
+			return true;
+		}
+
+		if (pm_adding_new) {
+			if (key == "enter" and not pm_new_name_input.empty()) {
+				Config::ProcessLogConfig new_cfg;
+				new_cfg.name = pm_new_name_input;
+				new_cfg.command = pm_new_name_input;
+				new_cfg.tagged = false;
+				Config::save_process_config(new_cfg);
+				pm_adding_new = false;
+				pm_list_selected = static_cast<int>(Config::logging.processes.size()) - 1;
+				pm_load_selected_config();
+				pm_panel_focus = 1;
+				pm_editor_field = 0;
+				pm_new_name_input.clear();
+				pm_newname_cursor = 0;
+				redraw = true;
+				return false;
+			}
+			if (key == "backspace" and pm_newname_cursor > 0) {
+				pm_new_name_input.erase(static_cast<size_t>(pm_newname_cursor - 1), 1);
+				pm_newname_cursor--;
+				redraw = true;
+				return false;
+			}
+			if (key == "left" and pm_newname_cursor > 0) {
+				pm_newname_cursor--;
+				redraw = true;
+				return false;
+			}
+			if (key == "right" and pm_newname_cursor < static_cast<int>(pm_new_name_input.length())) {
+				pm_newname_cursor++;
+				redraw = true;
+				return false;
+			}
+			if (key.length() == 1 and isprint(key[0]) and pm_new_name_input.length() < 30) {
+				pm_new_name_input.insert(static_cast<size_t>(pm_newname_cursor), 1, key[0]);
+				pm_newname_cursor++;
+				redraw = true;
+				return false;
+			}
 			return false;
 		}
-		if (key == "shift_tab" || key == "up") {
-			config_modal_field = (config_modal_field - 1 + 6) % 6;
+
+		if (key == "tab") {
+			pm_panel_focus = (pm_panel_focus + 1) % 2;
 			redraw = true;
 			return false;
 		}
 
-		//? Handle field-specific input
-		if (config_modal_field == 0) {
-			//? Command text input with cursor support (supports wildcards like *)
-			if (key == "left" && config_modal_cmd_cursor > 0) {
-				config_modal_cmd_cursor--;
-				redraw = true;
-			} else if (key == "right" && config_modal_cmd_cursor < static_cast<int>(config_modal_cmdline.length())) {
-				config_modal_cmd_cursor++;
-				redraw = true;
-			} else if (key == "home") {
-				config_modal_cmd_cursor = 0;
-				redraw = true;
-			} else if (key == "end") {
-				config_modal_cmd_cursor = static_cast<int>(config_modal_cmdline.length());
-				redraw = true;
-			} else if (key == "backspace" && config_modal_cmd_cursor > 0) {
-				config_modal_cmdline.erase(static_cast<size_t>(config_modal_cmd_cursor - 1), 1);
-				config_modal_cmd_cursor--;
-				redraw = true;
-			} else if (key == "delete" && config_modal_cmd_cursor < static_cast<int>(config_modal_cmdline.length())) {
-				config_modal_cmdline.erase(static_cast<size_t>(config_modal_cmd_cursor), 1);
-				redraw = true;
-			} else if (key == "space" && config_modal_cmdline.length() < 100) {
-				config_modal_cmdline.insert(static_cast<size_t>(config_modal_cmd_cursor), 1, ' ');
-				config_modal_cmd_cursor++;
-				redraw = true;
-			} else if (key.length() == 1 && isprint(key[0]) && config_modal_cmdline.length() < 100) {
-				config_modal_cmdline.insert(static_cast<size_t>(config_modal_cmd_cursor), 1, key[0]);
-				config_modal_cmd_cursor++;
-				redraw = true;
-			}
-		}
-		else if (config_modal_field == 1) {
-			//? Display name text input with cursor support
-			if (key == "left" && config_modal_display_cursor > 0) {
-				config_modal_display_cursor--;
-				redraw = true;
-			} else if (key == "right" && config_modal_display_cursor < static_cast<int>(config_modal_display.length())) {
-				config_modal_display_cursor++;
-				redraw = true;
-			} else if (key == "home") {
-				config_modal_display_cursor = 0;
-				redraw = true;
-			} else if (key == "end") {
-				config_modal_display_cursor = static_cast<int>(config_modal_display.length());
-				redraw = true;
-			} else if (key == "backspace" && config_modal_display_cursor > 0) {
-				config_modal_display.erase(static_cast<size_t>(config_modal_display_cursor - 1), 1);
-				config_modal_display_cursor--;
-				redraw = true;
-			} else if (key == "delete" && config_modal_display_cursor < static_cast<int>(config_modal_display.length())) {
-				config_modal_display.erase(static_cast<size_t>(config_modal_display_cursor), 1);
-				redraw = true;
-			} else if (key == "space" && config_modal_display.length() < 30) {
-				config_modal_display.insert(static_cast<size_t>(config_modal_display_cursor), 1, ' ');
-				config_modal_display_cursor++;
-				redraw = true;
-			} else if (key.length() == 1 && isprint(key[0]) && config_modal_display.length() < 30) {
-				config_modal_display.insert(static_cast<size_t>(config_modal_display_cursor), 1, key[0]);
-				config_modal_display_cursor++;
-				redraw = true;
-			}
-		}
-		else if (config_modal_field == 2) {
-			//? Log path text input with cursor support
-			if (key == "left" && config_modal_path_cursor > 0) {
-				config_modal_path_cursor--;
-				redraw = true;
-			} else if (key == "right" && config_modal_path_cursor < static_cast<int>(config_modal_path.length())) {
-				config_modal_path_cursor++;
-				redraw = true;
-			} else if (key == "home") {
-				config_modal_path_cursor = 0;
-				redraw = true;
-			} else if (key == "end") {
-				config_modal_path_cursor = static_cast<int>(config_modal_path.length());
-				redraw = true;
-			} else if (key == "backspace" && config_modal_path_cursor > 0) {
-				config_modal_path.erase(static_cast<size_t>(config_modal_path_cursor - 1), 1);
-				config_modal_path_cursor--;
-				redraw = true;
-			} else if (key == "delete" && config_modal_path_cursor < static_cast<int>(config_modal_path.length())) {
-				config_modal_path.erase(static_cast<size_t>(config_modal_path_cursor), 1);
-				redraw = true;
-		} else if (key == "space" && config_modal_path.length() < 100) {
-			config_modal_path.insert(static_cast<size_t>(config_modal_path_cursor), 1, ' ');
-			config_modal_path_cursor++;
+		if (key == "n" or key == "+") {
+			pm_adding_new = true;
+			pm_new_name_input.clear();
+			pm_newname_cursor = 0;
 			redraw = true;
-		} else if (key.length() == 1 && isprint(key[0]) && config_modal_path.length() < 100) {
-			config_modal_path.insert(static_cast<size_t>(config_modal_path_cursor), 1, key[0]);
-			config_modal_path_cursor++;
-			redraw = true;
+			return false;
 		}
-		}
-		else if (config_modal_field == 3) {
-			//? Tagged checkbox
-			if (key == "space" || key == "enter") {
-				config_modal_tagged = !config_modal_tagged;
+
+		if (pm_panel_focus == 0) {
+			if (is_in(key, "down", "j") and list_count > 0) {
+				pm_list_selected = (pm_list_selected < 0) ? 0 : (pm_list_selected + 1) % list_count;
+				pm_load_selected_config();
 				redraw = true;
+				return false;
 			}
-		}
-		else if (config_modal_field == 4) {
-			//? Color selection (only if tagged)
-			if (config_modal_tagged) {
-				if (key == "left" || key == "h") {
-					config_modal_color_idx = (config_modal_color_idx - 1 + 6) % 6;
-					redraw = true;
-				} else if (key == "right" || key == "l") {
-					config_modal_color_idx = (config_modal_color_idx + 1) % 6;
-					redraw = true;
-				} else if (key.length() == 1 && key[0] >= '1' && key[0] <= '6') {
-					config_modal_color_idx = key[0] - '1';
+			if (is_in(key, "up", "k") and list_count > 0) {
+				pm_list_selected = (pm_list_selected < 0) ? list_count - 1 : (pm_list_selected - 1 + list_count) % list_count;
+				pm_load_selected_config();
+				redraw = true;
+				return false;
+			}
+			if (key == "enter" and (list_count > 0 or pm_list_selected < 0)) {
+				pm_panel_focus = 1;
+				pm_editor_field = 0;
+				redraw = true;
+				return false;
+			}
+			if (key == "home" and list_count > 0) {
+				pm_list_selected = 0;
+				pm_list_scroll = 0;
+				pm_load_selected_config();
+				redraw = true;
+				return false;
+			}
+			if (key == "end" and list_count > 0) {
+				pm_list_selected = list_count - 1;
+				pm_load_selected_config();
+				redraw = true;
+				return false;
+			}
+			if (key == "page_down" and list_count > 0) {
+				pm_list_selected = std::min(pm_list_selected + 5, list_count - 1);
+				pm_load_selected_config();
+				redraw = true;
+				return false;
+			}
+			if (key == "page_up" and list_count > 0) {
+				pm_list_selected = std::max(pm_list_selected - 5, 0);
+				pm_load_selected_config();
+				redraw = true;
+				return false;
+			}
+			if (key.starts_with("pm_list_")) {
+				int idx = std::stoi(string(key.substr(8)));
+				if (idx >= 0 and idx < list_count) {
+					pm_list_selected = idx;
+					pm_load_selected_config();
 					redraw = true;
 				}
+				return false;
 			}
 		}
-		else if (config_modal_field == 5) {
-			//? Buttons
-			if (key == "left") {
-				config_modal_button = (config_modal_button - 1 + 4) % 4;
+		else {
+			if (is_in(key, "down", "j", "tab")) {
+				pm_editor_field = (pm_editor_field + 1) % 7;
 				redraw = true;
-			} else if (key == "right") {
-				config_modal_button = (config_modal_button + 1) % 4;
+				return false;
+			}
+			if (is_in(key, "up", "k", "shift_tab")) {
+				pm_editor_field = (pm_editor_field - 1 + 7) % 7;
 				redraw = true;
-			} else if (key == "enter") {
-				if (config_modal_button == 0) {
-					//? Save
+				return false;
+			}
+			if (key == "page_down") {
+				pm_editor_field = std::min(pm_editor_field + 3, 6);
+				redraw = true;
+				return false;
+			}
+			if (key == "page_up") {
+				pm_editor_field = std::max(pm_editor_field - 3, 0);
+				redraw = true;
+				return false;
+			}
+
+			if (pm_editor_field == 0) {
+				if (key == "left" and pm_cmd_cursor > 0) { pm_cmd_cursor--; redraw = true; return false; }
+				else if (key == "right" and pm_cmd_cursor < static_cast<int>(pm_edit_command.length())) { pm_cmd_cursor++; redraw = true; return false; }
+				else if (key == "home") { pm_cmd_cursor = 0; redraw = true; return false; }
+				else if (key == "end") { pm_cmd_cursor = static_cast<int>(pm_edit_command.length()); redraw = true; return false; }
+				else if (key == "backspace" and pm_cmd_cursor > 0) {
+					pm_edit_command.erase(static_cast<size_t>(pm_cmd_cursor - 1), 1);
+					pm_cmd_cursor--;
+					redraw = true;
+					return false;
+				}
+				else if (key == "delete" and pm_cmd_cursor < static_cast<int>(pm_edit_command.length())) {
+					pm_edit_command.erase(static_cast<size_t>(pm_cmd_cursor), 1);
+					redraw = true;
+					return false;
+				}
+				else if (key == "space" and pm_edit_command.length() < 100) {
+					pm_edit_command.insert(static_cast<size_t>(pm_cmd_cursor), 1, ' ');
+					pm_cmd_cursor++;
+					redraw = true;
+					return false;
+				}
+				else if (key.length() == 1 and isprint(key[0]) and pm_edit_command.length() < 100) {
+					pm_edit_command.insert(static_cast<size_t>(pm_cmd_cursor), 1, key[0]);
+					pm_cmd_cursor++;
+					redraw = true;
+					return false;
+				}
+			}
+			else if (pm_editor_field == 1) {
+				if (key == "left" and pm_display_cursor > 0) { pm_display_cursor--; redraw = true; return false; }
+				else if (key == "right" and pm_display_cursor < static_cast<int>(pm_edit_display.length())) { pm_display_cursor++; redraw = true; return false; }
+				else if (key == "home") { pm_display_cursor = 0; redraw = true; return false; }
+				else if (key == "end") { pm_display_cursor = static_cast<int>(pm_edit_display.length()); redraw = true; return false; }
+				else if (key == "backspace" and pm_display_cursor > 0) {
+					pm_edit_display.erase(static_cast<size_t>(pm_display_cursor - 1), 1);
+					pm_display_cursor--;
+					redraw = true;
+					return false;
+				}
+				else if (key == "delete" and pm_display_cursor < static_cast<int>(pm_edit_display.length())) {
+					pm_edit_display.erase(static_cast<size_t>(pm_display_cursor), 1);
+					redraw = true;
+					return false;
+				}
+				else if (key == "space" and pm_edit_display.length() < 30) {
+					pm_edit_display.insert(static_cast<size_t>(pm_display_cursor), 1, ' ');
+					pm_display_cursor++;
+					redraw = true;
+					return false;
+				}
+				else if (key.length() == 1 and isprint(key[0]) and pm_edit_display.length() < 30) {
+					pm_edit_display.insert(static_cast<size_t>(pm_display_cursor), 1, key[0]);
+					pm_display_cursor++;
+					redraw = true;
+					return false;
+				}
+			}
+			else if (pm_editor_field == 2) {
+				if (key == "left" and pm_path_cursor > 0) { pm_path_cursor--; redraw = true; return false; }
+				else if (key == "right" and pm_path_cursor < static_cast<int>(pm_edit_path.length())) { pm_path_cursor++; redraw = true; return false; }
+				else if (key == "home") { pm_path_cursor = 0; redraw = true; return false; }
+				else if (key == "end") { pm_path_cursor = static_cast<int>(pm_edit_path.length()); redraw = true; return false; }
+				else if (key == "backspace" and pm_path_cursor > 0) {
+					pm_edit_path.erase(static_cast<size_t>(pm_path_cursor - 1), 1);
+					pm_path_cursor--;
+					redraw = true;
+					return false;
+				}
+				else if (key == "delete" and pm_path_cursor < static_cast<int>(pm_edit_path.length())) {
+					pm_edit_path.erase(static_cast<size_t>(pm_path_cursor), 1);
+					redraw = true;
+					return false;
+				}
+				else if (key == "space" and pm_edit_path.length() < 100) {
+					pm_edit_path.insert(static_cast<size_t>(pm_path_cursor), 1, ' ');
+					pm_path_cursor++;
+					redraw = true;
+					return false;
+				}
+				else if (key.length() == 1 and isprint(key[0]) and pm_edit_path.length() < 100) {
+					pm_edit_path.insert(static_cast<size_t>(pm_path_cursor), 1, key[0]);
+					pm_path_cursor++;
+					redraw = true;
+					return false;
+				}
+			}
+			else if (pm_editor_field == 3) {
+				if (is_in(key, "left", "h")) {
+					pm_edit_log_display = 0;
+					redraw = true;
+					return false;
+				}
+				else if (is_in(key, "right", "l")) {
+					pm_edit_log_display = 1;
+					redraw = true;
+					return false;
+				}
+				else if (is_in(key, "space", "enter")) {
+					pm_edit_log_display = (pm_edit_log_display + 1) % 2;
+					redraw = true;
+					return false;
+				}
+			}
+			else if (pm_editor_field == 4) {
+				if (is_in(key, "space", "enter")) {
+					pm_edit_tagged = not pm_edit_tagged;
+					redraw = true;
+					return false;
+				}
+			}
+			else if (pm_editor_field == 5) {
+				if (pm_edit_tagged) {
+					if (is_in(key, "left", "h")) {
+						pm_edit_color_idx = (pm_edit_color_idx - 1 + 6) % 6;
+						redraw = true;
+						return false;
+					}
+					else if (is_in(key, "right", "l")) {
+						pm_edit_color_idx = (pm_edit_color_idx + 1) % 6;
+						redraw = true;
+						return false;
+					}
+					else if (key.length() == 1 and key[0] >= '1' and key[0] <= '6') {
+						pm_edit_color_idx = key[0] - '1';
+						redraw = true;
+						return false;
+					}
+				}
+			}
+			else if (pm_editor_field == 6) {
+				if (is_in(key, "left", "h")) {
+					pm_editor_button = (pm_editor_button - 1 + 3) % 3;
+					redraw = true;
+					return false;
+				}
+				if (is_in(key, "right", "l")) {
+					pm_editor_button = (pm_editor_button + 1) % 3;
+					redraw = true;
+					return false;
+				}
+				if (key == "enter") {
+					if (pm_editor_button == 0) {
+						Config::ProcessLogConfig cfg;
+						cfg.name = pm_edit_name;
+						cfg.command = pm_edit_command;
+						cfg.display_name = pm_edit_display;
+						cfg.log_path = pm_edit_path;
+						cfg.log_display = (pm_edit_log_display == 1) ? "application" : "system";
+						cfg.tagged = pm_edit_tagged;
+						cfg.tag_color = pm_edit_tagged ? string(TagColors::themes[static_cast<size_t>(pm_edit_color_idx)]) : "";
+						if (not pm_edit_original_cmd.empty() and pm_edit_command != pm_edit_original_cmd) {
+							Config::remove_process_config(pm_edit_name, pm_edit_original_cmd);
+						}
+						Config::save_process_config(cfg);
+						const auto& procs = Config::logging.processes;
+						for (size_t i = 0; i < procs.size(); i++) {
+							if (procs[i].name == pm_edit_name and procs[i].command == pm_edit_command) {
+								pm_list_selected = static_cast<int>(i);
+								break;
+							}
+						}
+						pm_edit_original_cmd = pm_edit_command;
+						pm_load_selected_config();
+						pm_toast_active = true;
+						pm_toast_time = Tools::time_ms();
+						pm_toast_message = "Saved!";
+						redraw = true;
+						Proc::redraw = true;
+					}
+					else if (pm_editor_button == 1) {
+						Config::remove_process_config(pm_edit_name, pm_edit_command);
+						if (pm_list_selected >= static_cast<int>(Config::logging.processes.size())) {
+							pm_list_selected = std::max(0, static_cast<int>(Config::logging.processes.size()) - 1);
+						}
+						pm_load_selected_config();
+						redraw = true;
+						Proc::redraw = true;
+					}
+					else if (pm_editor_button == 2) {
+						process_manager_active = false;
+						redraw = true;
+						Proc::redraw = true;
+						return true;
+					}
+					return false;
+				}
+			}
+
+		}
+
+		//? Mouse handlers - must be OUTSIDE the if/else block to work regardless of panel focus
+		if (key == "pm_edit_panel") {
+			pm_panel_focus = 1;
+			redraw = true;
+			return false;
+		}
+		if (key.starts_with("pm_field_")) {
+			int field = key.back() - '0';
+			if (field >= 0 and field <= 6) {
+				pm_panel_focus = 1;
+				pm_editor_field = field;
+				if (field == 4) pm_edit_tagged = not pm_edit_tagged;
+				redraw = true;
+			}
+			return false;
+		}
+		if (key.starts_with("pm_logdisp_")) {
+			int opt = key.back() - '0';
+			if (opt >= 0 and opt <= 1) {
+				pm_panel_focus = 1;
+				pm_editor_field = 3;
+				pm_edit_log_display = opt;
+				redraw = true;
+			}
+			return false;
+		}
+		if (key.starts_with("pm_color_")) {
+			int color = key.back() - '0';
+			if (color >= 0 and color <= 5 and pm_edit_tagged) {
+				pm_panel_focus = 1;
+				pm_edit_color_idx = color;
+				pm_editor_field = 5;
+				redraw = true;
+			}
+			return false;
+		}
+		if (key.starts_with("pm_btn_")) {
+			int btn = key.back() - '0';
+			if (btn >= 0 and btn <= 2) {
+				pm_panel_focus = 1;
+				pm_editor_field = 6;
+				pm_editor_button = btn;
+				if (btn == 0) {
 					Config::ProcessLogConfig cfg;
-					cfg.name = config_modal_name;
-					cfg.command = config_modal_cmdline;  //? Store command (may include wildcards)
-					cfg.display_name = config_modal_display;
-					cfg.log_path = config_modal_path;
-					cfg.tagged = config_modal_tagged;
-					cfg.tag_color = config_modal_tagged ? string(TagColors::themes[static_cast<size_t>(config_modal_color_idx)]) : "";
-					//? Remove old config if command changed
-					if (config_modal_cmdline != config_modal_original_cmd) {
-						Config::remove_process_config(config_modal_name, config_modal_original_cmd);
+					cfg.name = pm_edit_name;
+					cfg.command = pm_edit_command;
+					cfg.display_name = pm_edit_display;
+					cfg.log_path = pm_edit_path;
+					cfg.log_display = (pm_edit_log_display == 1) ? "application" : "system";
+					cfg.tagged = pm_edit_tagged;
+					cfg.tag_color = pm_edit_tagged ? string(TagColors::themes[static_cast<size_t>(pm_edit_color_idx)]) : "";
+					if (pm_edit_command != pm_edit_original_cmd) {
+						Config::remove_process_config(pm_edit_name, pm_edit_original_cmd);
 					}
 					Config::save_process_config(cfg);
-					config_modal_active = false;
+					pm_load_selected_config();
+					pm_toast_active = true;
+					pm_toast_time = Tools::time_ms();
+					pm_toast_message = "Saved!";
 					redraw = true;
-					Proc::redraw = true;  //? Refresh header Log dots
-					return true;
-				} else if (config_modal_button == 1) {
-					//? Remove - use the command pattern shown in modal (not original cmdline)
-					Config::remove_process_config(config_modal_name, config_modal_cmdline);
-					config_modal_active = false;
+					Proc::redraw = true;
+				}
+				else if (btn == 1) {
+					Config::remove_process_config(pm_edit_name, pm_edit_command);
+					if (pm_list_selected >= static_cast<int>(Config::logging.processes.size())) {
+						pm_list_selected = std::max(0, static_cast<int>(Config::logging.processes.size()) - 1);
+					}
+					pm_load_selected_config();
 					redraw = true;
-					Proc::redraw = true;  //? Refresh header Log dots
-					return true;
-				} else if (config_modal_button == 2) {
-					//? Cancel
-					config_modal_active = false;
+					Proc::redraw = true;
+				}
+				else if (btn == 2) {
+					process_manager_active = false;
 					redraw = true;
-					Proc::redraw = true;  //? Refresh display
-					return true;
-				} else {
-					//? Clear All - remove ALL process configs
-					Config::clear_all_process_configs();
-					config_modal_active = false;
-					redraw = true;
-					Proc::redraw = true;  //? Refresh display
+					Proc::redraw = true;
 					return true;
 				}
 			}
+			return false;
+		}
+		if (key == "pm_scroll_up") {
+			if (pm_editor_scroll > 0) {
+				pm_editor_scroll--;
+				redraw = true;
+			}
+			return false;
+		}
+		if (key == "pm_scroll_down") {
+			pm_editor_scroll++;
+			redraw = true;
+			return false;
 		}
 
 		return false;
 	}
 
-	string draw_config_modal() {
+	string draw_process_manager() {
 		const auto& theme = Theme::c;
 		string out;
 
-		const int modal_w = 54;
-		const int modal_h = 20;  //? +2 for command field with hint
+		const auto& processes = Config::logging.processes;
+		const int list_count = static_cast<int>(processes.size());
 
-		//? Use Proc panel coordinates for modal position
-		//? This allows the modal to work even when Logs panel is not shown
-		int panel_x = Proc::x;
-		int panel_y = Proc::y;
-		int panel_w = Proc::width;
-		int panel_h = Proc::height;
+		const int min_w = 72;
+		const int max_w = 100;
+		const int modal_w = std::clamp(Proc::width - 6, min_w, max_w);
+		const int modal_h = std::min(24, std::max(16, Proc::height - 4));
 
-		const int modal_x = panel_x + (panel_w - modal_w) / 2;
-		const int modal_y = panel_y + (panel_h - modal_h) / 2;
-		const int pad_x = modal_x + 3;  //? Horizontal padding
+		const int modal_x = Proc::x + (Proc::width - modal_w) / 2;
+		const int modal_y = Proc::y + (Proc::height - modal_h) / 2;
 
-		//? Draw modal box
-		out += Draw::createBox(modal_x, modal_y, modal_w, modal_h, theme("hi_fg"), true, "Process Log Config");
+		const int left_w = 30;
+		const int divider_x = modal_x + left_w;
+		const int right_w = modal_w - left_w - 1;
+		const int right_x = divider_x + 1;
 
-		int row_y = modal_y + 3;  //? Start with 1 row padding after title
+		out += Draw::createBox(modal_x, modal_y, modal_w, modal_h, theme("hi_fg"), true, "Process Manager");
 
-		//? Process info (read-only)
-		out += Mv::to(row_y, pad_x);
-		out += theme("inactive_fg") + "Process: " + theme("main_fg") + config_modal_name;
-		row_y++;
+		int close_x = modal_x + modal_w - 5;
+		out += Mv::to(modal_y, close_x) + theme("hi_fg") + "[" + theme("inactive_fg") + "×" + theme("hi_fg") + "]";
+		Input::mouse_mappings["pm_close"] = {modal_y, close_x, 1, 3};
 
-		//? Command field (editable, supports wildcards like *)
-		int cmd_row = row_y;
-		out += Mv::to(row_y, pad_x);
-		bool field_sel = (config_modal_field == 0);
-		out += theme("main_fg") + "Command: ";
-		if (field_sel) out += theme("selected_bg") + theme("selected_fg");
-		//? Build command text with cursor
-		string cmd_text;
-		if (config_modal_cmdline.empty()) {
-			cmd_text = field_sel ? "_" + string(34, ' ') : string(35, '_');
-		} else {
-			if (field_sel) {
-				cmd_text = config_modal_cmdline.substr(0, static_cast<size_t>(config_modal_cmd_cursor))
-					+ "_" + config_modal_cmdline.substr(static_cast<size_t>(config_modal_cmd_cursor));
-				cmd_text += string(max(0, 35 - static_cast<int>(cmd_text.length())), ' ');
-			} else {
-				cmd_text = config_modal_cmdline + string(max(0, 35 - static_cast<int>(config_modal_cmdline.length())), ' ');
-			}
+		for (int row = 1; row < modal_h - 1; row++) {
+			out += Mv::to(modal_y + row, divider_x) + theme("hi_fg") + "│";
 		}
-		out += "[" + cmd_text.substr(0, 36) + "]";
-		out += Fx::reset;
-		Input::mouse_mappings["config_field_0"] = {cmd_row, pad_x + 9, 1, 37};
-		row_y++;
-		//? Hint below command field
-		out += Mv::to(row_y, pad_x + 9);
-		out += theme("inactive_fg") + "(use * for wildcard)";
-		row_y += 2;
+		out += Mv::to(modal_y, divider_x) + theme("hi_fg") + "┬";
+		out += Mv::to(modal_y + modal_h - 1, divider_x) + theme("hi_fg") + "┴";
 
-		//? Display Name field
-		int display_row = row_y;
-		out += Mv::to(row_y, pad_x);
-		field_sel = (config_modal_field == 1);
-		out += theme("main_fg") + "Display: ";
-		if (field_sel) out += theme("selected_bg") + theme("selected_fg");
-		//? Build display text with cursor
-		string disp_text;
-		if (config_modal_display.empty()) {
-			disp_text = field_sel ? "_" + string(24, ' ') : string(25, '_');
-		} else {
-			if (field_sel) {
-				//? Insert cursor character at cursor position
-				disp_text = config_modal_display.substr(0, static_cast<size_t>(config_modal_display_cursor))
-					+ "_" + config_modal_display.substr(static_cast<size_t>(config_modal_display_cursor));
-				disp_text += string(max(0, 25 - static_cast<int>(disp_text.length())), ' ');
-			} else {
-				disp_text = config_modal_display + string(max(0, 25 - static_cast<int>(config_modal_display.length())), ' ');
-			}
+		out += Mv::to(modal_y + 1, modal_x + 2) + theme("hi_fg") + "DEFINED PROCESSES";
+		out += Mv::to(modal_y + 1, right_x + 2) + theme("hi_fg") + "EDIT PROCESS";
+		Input::mouse_mappings["pm_edit_panel"] = {modal_y + 1, right_x, 1, right_w};
+
+		const int list_start_y = modal_y + 3;
+		const int list_visible = modal_h - 6;
+
+		if (pm_list_selected >= 0) {
+			if (pm_list_selected < pm_list_scroll) pm_list_scroll = pm_list_selected;
+			if (pm_list_selected >= pm_list_scroll + list_visible) pm_list_scroll = pm_list_selected - list_visible + 1;
 		}
-		out += "[" + disp_text.substr(0, 26) + "]";
-		out += Fx::reset;
-		Input::mouse_mappings["config_field_1"] = {display_row, pad_x + 9, 1, 27};
-		row_y++;
 
-		//? Log Path field
-		int logpath_row = row_y;
-		out += Mv::to(row_y, pad_x);
-		field_sel = (config_modal_field == 2);
-		out += theme("main_fg") + "LogPath: ";
-		if (field_sel) out += theme("selected_bg") + theme("selected_fg");
-		//? Build path text with cursor
-		string path_text;
-		if (config_modal_path.empty()) {
-			path_text = field_sel ? "_" + string(34, ' ') : string(35, '_');
-		} else {
-			if (field_sel) {
-				//? Insert cursor character at cursor position
-				path_text = config_modal_path.substr(0, static_cast<size_t>(config_modal_path_cursor))
-					+ "_" + config_modal_path.substr(static_cast<size_t>(config_modal_path_cursor));
-				path_text += string(max(0, 35 - static_cast<int>(path_text.length())), ' ');
-			} else {
-				path_text = config_modal_path + string(max(0, 35 - static_cast<int>(config_modal_path.length())), ' ');
-			}
-		}
-		out += "[" + path_text.substr(0, 36) + "]";
-		out += Fx::reset;
-		Input::mouse_mappings["config_field_2"] = {logpath_row, pad_x + 9, 1, 37};
-		row_y += 2;
+		for (int i = 0; i < list_visible; i++) {
+			int idx = pm_list_scroll + i;
+			int row_y = list_start_y + i;
+			out += Mv::to(row_y, modal_x + 1) + string(static_cast<size_t>(left_w - 1), ' ');
 
-		//? Tagged checkbox
-		int tagged_row = row_y;
-		out += Mv::to(row_y, pad_x);
-		field_sel = (config_modal_field == 3);
-		out += theme("main_fg") + "Tagged:  ";
-		if (field_sel) out += theme("selected_bg") + theme("selected_fg");
-		out += "[" + string(config_modal_tagged ? "x" : " ") + "]";
-		out += Fx::reset + theme("inactive_fg") + " (highlight in list)";
-		Input::mouse_mappings["config_field_3"] = {tagged_row, pad_x + 9, 1, 3};
-		row_y += 2;
+			if (idx < list_count) {
+				const auto& cfg = processes[static_cast<size_t>(idx)];
+				bool is_sel = (idx == pm_list_selected);
 
-		//? Color selection (only if tagged)
-		int color_row = row_y;
-		out += Mv::to(row_y, pad_x);
-		field_sel = (config_modal_field == 4);
-		out += theme("main_fg") + "Color:   ";
-		if (!config_modal_tagged) {
-			out += theme("inactive_fg") + "(enable Tagged first)";
-			//? Clear color mappings when disabled
-			for (int i = 0; i < 6; i++) {
-				Input::mouse_mappings.erase("config_color_" + to_string(i));
-			}
-		} else {
-			for (size_t i = 0; i < 6; i++) {
-				bool color_sel = field_sel && (static_cast<int>(i) == config_modal_color_idx);
-				if (color_sel) out += theme("selected_bg");
-				out += theme(TagColors::themes[i]) + "██" + Fx::reset + " ";
-				//? Mouse mapping for each color: 2 chars wide + 1 space
-				Input::mouse_mappings["config_color_" + to_string(i)] = {color_row, pad_x + 9 + static_cast<int>(i) * 3, 1, 2};
-			}
-			out += theme("inactive_fg") + "(1-6)";
-		}
-		row_y++;
+				string line;
+				line += (is_sel and pm_panel_focus == 0) ? ">" : " ";
 
-		//? Selection indicator (centered below selected color)
-		if (config_modal_tagged) {
-			//? Each color is "██ " (2 chars + space = 3 total), center triangle under the 2-char block
-			out += Mv::to(row_y, pad_x + 10 + config_modal_color_idx * 3);
-			out += theme("hi_fg") + "▲";
-		}
-		row_y += 2;
-
-		//? Buttons (with extra space below before instructions)
-		int btn_row = modal_y + modal_h - 5;
-		out += Mv::to(btn_row, pad_x + 1);
-		const array<string, 4> buttons = {"Save", "Remove", "Cancel", "Clear All"};
-		int btn_x = pad_x + 1;
-		for (size_t i = 0; i < 4; i++) {
-			bool btn_sel = (config_modal_field == 5 && config_modal_button == static_cast<int>(i));
-			if (i == 3) {
-				//? "Clear All" button in Aurora red
-				if (btn_sel) {
-					out += theme("selected_bg") + theme("log_fault") + Fx::b;
+				if (cfg.has_tagging()) {
+					line += theme(cfg.tag_color) + "██" + Fx::reset;
 				} else {
-					out += theme("log_fault");
+					line += "  ";
 				}
-			} else if (btn_sel) {
-				out += theme("selected_bg") + theme("selected_fg") + Fx::b;
-			} else {
-				out += theme("main_fg");
+
+				if (cfg.has_logging()) {
+					line += theme("main_fg") + "[L]";
+				} else {
+					line += "   ";
+				}
+
+				string display = cfg.display_name.empty() ? cfg.name : cfg.display_name;
+				string suffix = " (" + cfg.name + ")";
+				int max_total = left_w - 8;
+				int total_len = static_cast<int>(display.length() + suffix.length());
+				
+				if (total_len > max_total) {
+					int display_max = std::min(static_cast<int>(display.length()), max_total - 6);
+					if (display_max < static_cast<int>(display.length())) {
+						display = display.substr(0, static_cast<size_t>(std::max(1, display_max - 2))) + "..";
+					}
+					int suffix_space = max_total - static_cast<int>(display.length());
+					if (suffix_space >= 6 and static_cast<int>(suffix.length()) > suffix_space) {
+						int name_space = suffix_space - 5;
+						suffix = " (" + cfg.name.substr(0, static_cast<size_t>(name_space)) + "..)";
+					} else if (suffix_space < 6) {
+						suffix = "";
+					}
+				}
+
+				if (is_sel) {
+					line += theme("selected_bg") + theme("selected_fg");
+				} else {
+					line += theme("main_fg");
+				}
+				line += " " + display + theme("inactive_fg") + suffix + Fx::reset;
+
+				out += Mv::to(row_y, modal_x + 1) + line;
+				Input::mouse_mappings["pm_list_" + to_string(idx)] = {row_y, modal_x + 1, 1, left_w - 1};
 			}
-			out += "[" + buttons[i] + "]" + Fx::reset + "  ";
-			//? Mouse mapping for button: [text] + 2 spaces
-			int btn_width = static_cast<int>(buttons[i].length()) + 2;  // brackets
-			Input::mouse_mappings["config_btn_" + to_string(i)] = {btn_row, btn_x, 1, btn_width};
-			btn_x += btn_width + 2;  // button width + 2 spaces
 		}
 
-		//? Instructions
-		out += Mv::to(modal_y + modal_h - 2, pad_x);
-		out += theme("inactive_fg") + "Tab:Next  Enter:Select  Esc:Cancel  Click:Select";
+		int btn_y = modal_y + modal_h - 3;
+		out += Mv::to(btn_y, modal_x + 2);
+		bool new_sel = pm_adding_new;
+		if (new_sel) out += theme("selected_bg") + theme("selected_fg");
+		else out += theme("main_fg");
+		out += "[+ New]" + Fx::reset;
+		Input::mouse_mappings["pm_new"] = {btn_y, modal_x + 2, 1, 7};
+
+		if (pm_adding_new) {
+			out += Mv::to(btn_y, modal_x + 11) + theme("main_fg") + "Name: ";
+			out += theme("selected_bg") + theme("selected_fg") + "[";
+			string name_display = pm_new_name_input.substr(0, static_cast<size_t>(pm_newname_cursor)) + "_" +
+			                      pm_new_name_input.substr(static_cast<size_t>(pm_newname_cursor));
+			name_display += string(std::max(0, 12 - static_cast<int>(name_display.length())), ' ');
+			out += name_display.substr(0, 13) + "]" + Fx::reset;
+		}
+
+		const int ed_x = right_x + 2;
+		const int ed_start_y = modal_y + 3;
+		const int ed_end_y = modal_y + modal_h - 3;
+		const int ed_visible = ed_end_y - ed_start_y;
+
+		const int ed_content_lines = 16;
+		const int ed_max_scroll = std::max(0, ed_content_lines - ed_visible);
+		pm_editor_scroll = std::clamp(pm_editor_scroll, 0, ed_max_scroll);
+
+		if (pm_panel_focus == 1) {
+			int field_start_line[] = {1, 4, 6, 8, 10, 12, 15};
+			int target_line = field_start_line[std::min(pm_editor_field, 6)];
+			if (target_line < pm_editor_scroll) pm_editor_scroll = target_line;
+			if (target_line >= pm_editor_scroll + ed_visible) pm_editor_scroll = target_line - ed_visible + 1;
+		}
+
+		bool field_focus = (pm_panel_focus == 1);
+		int content_line = 0;
+
+		auto in_view = [&](int line) { return line >= pm_editor_scroll and line < pm_editor_scroll + ed_visible; };
+		auto screen_y = [&](int line) { return ed_start_y + line - pm_editor_scroll; };
+
+		auto draw_text_field = [&](int field_idx, const string& label, const string& value, int cursor, int max_len) {
+			if (not in_view(content_line)) { content_line++; return; }
+			int y = screen_y(content_line);
+			bool sel = field_focus and pm_editor_field == field_idx;
+			out += Mv::to(y, ed_x) + theme("main_fg") + label + ": ";
+			if (sel) out += theme("selected_bg") + theme("selected_fg");
+			string text;
+			if (value.empty()) {
+				text = sel ? "_" + string(static_cast<size_t>(max_len - 1), ' ') : string(static_cast<size_t>(max_len), '_');
+			} else if (sel) {
+				int view_offset = 0, display_len = max_len - 1;
+				if (cursor > display_len) view_offset = cursor - display_len;
+				string visible = value.substr(static_cast<size_t>(view_offset));
+				int rel_cursor = cursor - view_offset;
+				text = visible.substr(0, static_cast<size_t>(rel_cursor)) + "_" + visible.substr(static_cast<size_t>(rel_cursor));
+				if (static_cast<int>(text.length()) < max_len) text += string(static_cast<size_t>(max_len - static_cast<int>(text.length())), ' ');
+			} else {
+				int view_offset = std::max(0, static_cast<int>(value.length()) - max_len);
+				text = value.substr(static_cast<size_t>(view_offset));
+				if (static_cast<int>(text.length()) < max_len) text += string(static_cast<size_t>(max_len - static_cast<int>(text.length())), ' ');
+			}
+			out += "[" + text.substr(0, static_cast<size_t>(max_len + 1)) + "]" + Fx::reset;
+			Input::mouse_mappings["pm_field_" + to_string(field_idx)] = {y, ed_x, 1, right_w - 4};
+			content_line++;
+		};
+
+		if (in_view(content_line)) {
+			out += Mv::to(screen_y(content_line), ed_x) + theme("inactive_fg") + "Process: " + theme("main_fg") + pm_edit_name;
+		}
+		content_line++;
+
+		draw_text_field(0, "Command", pm_edit_command, pm_cmd_cursor, right_w - 14);
+		if (in_view(content_line)) {
+			out += Mv::to(screen_y(content_line), ed_x + 9) + theme("inactive_fg") + "(use * for wildcard)";
+		}
+		content_line += 2;
+
+		draw_text_field(1, "Display", pm_edit_display, pm_display_cursor, 20);
+		content_line++;
+
+		draw_text_field(2, "LogPath", pm_edit_path, pm_path_cursor, right_w - 14);
+		content_line++;
+
+		if (in_view(content_line)) {
+			int y = screen_y(content_line);
+			bool logdisp_sel = field_focus and pm_editor_field == 3;
+			out += Mv::to(y, ed_x) + theme("main_fg") + "Log View:";
+			int radio_x = ed_x + 10;
+			if (logdisp_sel and pm_edit_log_display == 0) out += theme("selected_bg") + theme("selected_fg");
+			out += Mv::to(y, radio_x) + (pm_edit_log_display == 0 ? "●" : "○") + Fx::reset + " " + theme("main_fg") + "System ";
+			Input::mouse_mappings["pm_logdisp_0"] = {y, radio_x, 1, 8};
+			radio_x += 9;
+			if (logdisp_sel and pm_edit_log_display == 1) out += theme("selected_bg") + theme("selected_fg");
+			out += (pm_edit_log_display == 1 ? "●" : "○") + Fx::reset + " " + theme("main_fg") + "Application";
+			Input::mouse_mappings["pm_logdisp_1"] = {y, radio_x, 1, 13};
+			Input::mouse_mappings["pm_field_3"] = {y, ed_x, 1, 10};
+		}
+		content_line += 2;
+
+		if (in_view(content_line)) {
+			int y = screen_y(content_line);
+			bool tagged_sel = field_focus and pm_editor_field == 4;
+			out += Mv::to(y, ed_x) + theme("main_fg") + "Tagged:  ";
+			if (tagged_sel) out += theme("selected_bg") + theme("selected_fg");
+			out += "[" + string(pm_edit_tagged ? "x" : " ") + "]" + Fx::reset + theme("inactive_fg") + " (highlight in list)";
+			Input::mouse_mappings["pm_field_4"] = {y, ed_x + 9, 1, 3};
+		}
+		content_line += 2;
+
+		if (in_view(content_line)) {
+			int y = screen_y(content_line);
+			bool color_sel = field_focus and pm_editor_field == 5;
+			out += Mv::to(y, ed_x) + theme("main_fg") + "Color:   ";
+			Input::mouse_mappings["pm_field_5"] = {y, ed_x, 1, 9};
+			if (not pm_edit_tagged) {
+				out += theme("inactive_fg") + "(enable Tagged first)";
+				for (int i = 0; i < 6; i++) Input::mouse_mappings.erase("pm_color_" + to_string(i));
+			} else {
+				for (size_t i = 0; i < 6; i++) {
+					bool this_sel = color_sel and static_cast<int>(i) == pm_edit_color_idx;
+					if (this_sel) out += theme("selected_bg");
+					out += theme(TagColors::themes[i]) + "██" + Fx::reset + " ";
+					Input::mouse_mappings["pm_color_" + to_string(i)] = {y, ed_x + 9 + static_cast<int>(i) * 3, 1, 2};
+				}
+				out += theme("inactive_fg") + "(1-6)";
+			}
+		}
+		content_line++;
+		if (pm_edit_tagged and in_view(content_line)) {
+			out += Mv::to(screen_y(content_line), ed_x + 10 + pm_edit_color_idx * 3) + theme("hi_fg") + "▲";
+		}
+		content_line += 2;
+
+		if (in_view(content_line)) {
+			int y = screen_y(content_line);
+			out += Mv::to(y, ed_x);
+			const array<string, 3> buttons = {"Save", "Remove", "Cancel"};
+			int btn_x = ed_x;
+			for (size_t i = 0; i < 3; i++) {
+				bool btn_sel = field_focus and pm_editor_field == 6 and pm_editor_button == static_cast<int>(i);
+				if (btn_sel) out += theme("selected_bg") + theme("selected_fg") + Fx::b;
+				else out += theme("main_fg");
+				out += "[" + buttons[i] + "]" + Fx::reset + " ";
+				int w = static_cast<int>(buttons[i].length()) + 2;
+				Input::mouse_mappings["pm_btn_" + to_string(i)] = {y, btn_x, 1, w};
+				btn_x += w + 1;
+			}
+		}
+
+		if (ed_max_scroll > 0) {
+			if (pm_editor_scroll > 0) {
+				out += Mv::to(ed_start_y, right_x + right_w - 2) + theme("hi_fg") + "▲";
+				Input::mouse_mappings["pm_scroll_up"] = {ed_start_y, right_x + right_w - 2, 1, 1};
+			} else {
+				Input::mouse_mappings.erase("pm_scroll_up");
+			}
+			if (pm_editor_scroll < ed_max_scroll) {
+				out += Mv::to(ed_end_y - 1, right_x + right_w - 2) + theme("hi_fg") + "▼";
+				Input::mouse_mappings["pm_scroll_down"] = {ed_end_y - 1, right_x + right_w - 2, 1, 1};
+			} else {
+				Input::mouse_mappings.erase("pm_scroll_down");
+			}
+		} else {
+			Input::mouse_mappings.erase("pm_scroll_up");
+			Input::mouse_mappings.erase("pm_scroll_down");
+		}
+
+		out += Mv::to(modal_y + modal_h - 2, modal_x + 2);
+		out += theme("inactive_fg") + "Tab:Panel  ↑↓/PgUp/PgDn:Nav  n:New  Esc:Close";
+
+		if (pm_toast_active) {
+			if (Tools::time_ms() - pm_toast_time > 1000) {
+				pm_toast_active = false;
+			} else {
+				int toast_w = static_cast<int>(pm_toast_message.length()) + 4;
+				int toast_x = modal_x + (modal_w - toast_w) / 2;
+				int toast_y = modal_y + modal_h / 2;
+				out += Mv::to(toast_y, toast_x) + theme("hi_fg") + Fx::b + "[ " + pm_toast_message + " ]" + Fx::reset;
+				Input::mouse_mappings["pm_toast_dismiss"] = {toast_y, toast_x, 1, toast_w};
+			}
+		}
 
 		return out;
 	}
@@ -5614,17 +6011,6 @@ namespace Logs {
 			if (not buffer_modal_active) {
 				for (int i = 0; i < 7; i++) {
 					Input::mouse_mappings.erase("buffer_" + to_string(i));
-				}
-			}
-			if (not config_modal_active) {
-				for (int i = 0; i < 5; i++) {
-					Input::mouse_mappings.erase("config_field_" + to_string(i));
-				}
-				for (int i = 0; i < 6; i++) {
-					Input::mouse_mappings.erase("config_color_" + to_string(i));
-				}
-				for (int i = 0; i < 4; i++) {
-					Input::mouse_mappings.erase("config_btn_" + to_string(i));
 				}
 			}
 
@@ -5798,10 +6184,11 @@ namespace Logs {
 			int cur_x = x + 1;
 			
 			//? Calculate required width for full mode dynamically
-			//? Full: [LIVE]=7 + filter=len+1 + S:Sys●●=9 + pos=len+1 + |=2 + SPC:Pause=10 + E:Export=9 + F:Filter=9 + R:New=6 + B:xxx=2+len
+			//? Full: [LIVE]=7 + filter=len+1 + S:Sys●●=9 + pos=len+1 + |=2 + SPC:Pause=10 + E:Export=9 + F:Filter=9 + R:New=6 + B:xxx=2+len + C:Mbt=6
+			string copy_fmt = (Config::logging.copy_format == "raw") ? "Raw" : "Mbt";
 			int full_mode_width = 7 + static_cast<int>(filter_name.length()) + 1 + 9 
 				+ static_cast<int>(pos_str.length()) + 1 + 2 + 10 + 9 + 9 + 6 + 2 
-				+ static_cast<int>(to_string(max_entries).length());
+				+ static_cast<int>(to_string(max_entries).length()) + 1 + 2 + static_cast<int>(copy_fmt.length());
 			//? Use compact mode if full mode won't fit (with 2 char margin for safety)
 			bool compact = (content_width < full_mode_width + 2);
 			
@@ -5870,7 +6257,7 @@ namespace Logs {
 			
 			//? Buttons - full or compact labels
 			if (compact) {
-				//? Compact: Spc E F R B
+				//? Compact: Spc E F R B C
 				int p_x = cur_x;
 				out += hi + "Spc" + fg + " ";
 				cur_x += 4;
@@ -5892,11 +6279,16 @@ namespace Logs {
 				Input::mouse_mappings["logs_sort"] = {status_y, r_x, 1, 1};
 				
 				int b_x = cur_x;
-				out += hi + "B" + fg + ":" + to_string(max_entries);
-				cur_x += 2 + static_cast<int>(to_string(max_entries).length());
+				out += hi + "B" + fg + ":" + to_string(max_entries) + " ";
+				cur_x += 2 + static_cast<int>(to_string(max_entries).length()) + 1;
 				Input::mouse_mappings["logs_buffer"] = {status_y, b_x, 1, 2 + static_cast<int>(to_string(max_entries).length())};
+
+				int c_x = cur_x;
+				out += hi + "C" + fg + ":" + (Config::logging.copy_format == "raw" ? "R" : "M");
+				cur_x += 3;
+				Input::mouse_mappings["logs_copy_fmt"] = {status_y, c_x, 1, 3};
 			} else {
-				//? Full: SPC:Pause E:Export F:Filter R:New B:500
+				//? Full: SPC:Pause E:Export F:Filter R:New B:500 C:Mbt
 				int p_x = cur_x;
 				out += hi + "SPC" + fg + ":Pause ";
 				cur_x += 10;
@@ -5918,9 +6310,14 @@ namespace Logs {
 				Input::mouse_mappings["logs_sort"] = {status_y, r_x, 1, 2 + static_cast<int>(sort_str.length())};
 				
 				int b_x = cur_x;
-				out += hi + "B" + fg + ":" + to_string(max_entries);
-				cur_x += 2 + static_cast<int>(to_string(max_entries).length());
+				out += hi + "B" + fg + ":" + to_string(max_entries) + " ";
+				cur_x += 2 + static_cast<int>(to_string(max_entries).length()) + 1;
 				Input::mouse_mappings["logs_buffer"] = {status_y, b_x, 1, 2 + static_cast<int>(to_string(max_entries).length())};
+
+				int c_x = cur_x;
+				out += hi + "C" + fg + ":" + copy_fmt;
+				cur_x += 2 + static_cast<int>(copy_fmt.length());
+				Input::mouse_mappings["logs_copy_fmt"] = {status_y, c_x, 1, 2 + static_cast<int>(copy_fmt.length())};
 			}
 			
 			//? Pad remaining space
@@ -6047,6 +6444,17 @@ namespace Logs {
 
 			//? Note: Color picker and config modals are now drawn in Proc::draw()
 			//? since they use Proc panel coordinates and should work even when Logs is hidden
+
+			if (toast_active) {
+				if (Tools::time_ms() - toast_time > 1500) {
+					toast_active = false;
+				} else {
+					int toast_w = static_cast<int>(toast_message.length()) + 4;
+					int toast_x = x + (width - toast_w) / 2;
+					int toast_y = y + height / 2;
+					out += Mv::to(toast_y, toast_x) + theme("hi_fg") + Fx::b + "[ " + toast_message + " ]" + Fx::reset;
+				}
+			}
 
 			redraw = false;
 			return out + Fx::reset;

@@ -720,25 +720,49 @@ namespace Logs {
 	//* Handle error modal input (any key closes it)
 	bool error_modal_input(const std::string_view key);
 
-	//=== Log Config Modal State ===
-	extern bool config_modal_active;
-	extern string config_modal_name;        //? Process name being configured
-	extern string config_modal_cmdline;     //? Process cmdline for matching
-	extern string config_modal_display;     //? Editable display name
-	extern string config_modal_path;        //? Editable log path
-	extern bool config_modal_tagged;        //? Enable tagging checkbox
-	extern int config_modal_color_idx;      //? Selected color (0-4)
-	extern int config_modal_field;          //? 0=display, 1=path, 2=tagged, 3=color, 4=buttons
-	extern int config_modal_button;         //? 0=Save, 1=Remove, 2=Cancel
+	//* Copy log buffer to clipboard, returns true on success
+	bool copy_to_clipboard();
 
-	//* Show log config modal for a process
-	void show_config_modal(const string& name, const string& cmdline);
+	extern bool toast_active;
+	extern uint64_t toast_time;
+	extern string toast_message;
 
-	//* Handle log config modal input, returns true if modal closed
-	bool config_modal_input(const std::string_view key);
+	//=== Process Manager Modal State (2-panel dialog) ===
+	extern bool process_manager_active;
+	extern int pm_list_selected;           //? Selected index in left panel (process list)
+	extern int pm_list_scroll;             //? Scroll offset for left panel
+	extern int pm_panel_focus;             //? 0=list panel, 1=editor panel
+	extern int pm_editor_field;            //? 0=command, 1=display, 2=path, 3=tagged, 4=color, 5=buttons
+	extern int pm_editor_button;           //? 0=Save, 1=Remove, 2=Cancel, 3=Clear All
+	extern bool pm_adding_new;             //? True when adding a new process (name input mode)
+	extern string pm_new_name_input;       //? Name input for new process
 
-	//* Draw log config modal
-	string draw_config_modal();
+	//? Editor state for selected process
+	extern string pm_edit_name;            //? Process name (read-only after creation)
+	extern string pm_edit_command;         //? Command line pattern (editable)
+	extern string pm_edit_display;         //? Custom display name
+	extern string pm_edit_path;            //? Log file path
+	extern bool pm_edit_tagged;            //? Tagged checkbox state
+	extern int pm_edit_color_idx;          //? Selected color index (0-5)
+	extern string pm_edit_original_cmd;    //? Original command for update detection
+
+	//? Cursor positions for text fields
+	extern int pm_cmd_cursor;
+	extern int pm_display_cursor;
+	extern int pm_path_cursor;
+	extern int pm_newname_cursor;
+
+	//* Show process manager modal (optionally auto-select a process)
+	void show_process_manager(const string& auto_select_name = "", const string& auto_select_cmd = "");
+
+	//* Handle process manager input, returns true if modal closed
+	bool process_manager_input(const std::string_view key);
+
+	//* Draw process manager modal (2-panel layout)
+	string draw_process_manager();
+
+	//* Load selected process config into editor fields
+	void pm_load_selected_config();
 
 	//=== Color Picker Modal State ===
 	extern bool color_modal_active;
