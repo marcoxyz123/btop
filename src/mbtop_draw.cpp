@@ -5416,12 +5416,12 @@ namespace Logs {
 			}
 			else if (pm_editor_field == 5) {
 				if (is_in(key, "left", "h")) {
-					pm_editor_button = (pm_editor_button - 1 + 4) % 4;
+					pm_editor_button = (pm_editor_button - 1 + 3) % 3;
 					redraw = true;
 					return false;
 				}
 				if (is_in(key, "right", "l")) {
-					pm_editor_button = (pm_editor_button + 1) % 4;
+					pm_editor_button = (pm_editor_button + 1) % 3;
 					redraw = true;
 					return false;
 				}
@@ -5465,13 +5465,6 @@ namespace Logs {
 						Proc::redraw = true;
 						return true;
 					}
-					else if (pm_editor_button == 3) {
-						Config::clear_all_process_configs();
-						pm_list_selected = 0;
-						pm_load_selected_config();
-						redraw = true;
-						Proc::redraw = true;
-					}
 					return false;
 				}
 			}
@@ -5496,7 +5489,7 @@ namespace Logs {
 			}
 			if (key.starts_with("pm_btn_")) {
 				int btn = key.back() - '0';
-				if (btn >= 0 and btn <= 3) {
+				if (btn >= 0 and btn <= 2) {
 					pm_editor_field = 5;
 					pm_editor_button = btn;
 					if (btn == 0) {
@@ -5529,13 +5522,6 @@ namespace Logs {
 						redraw = true;
 						Proc::redraw = true;
 						return true;
-					}
-					else if (btn == 3) {
-						Config::clear_all_process_configs();
-						pm_list_selected = 0;
-						pm_load_selected_config();
-						redraw = true;
-						Proc::redraw = true;
 					}
 				}
 				return false;
@@ -5727,14 +5713,11 @@ namespace Logs {
 		}
 		ed_y += 2;
 
-		const array<string, 4> buttons = {"Save", "Remove", "Cancel", "Clear All"};
+		const array<string, 3> buttons = {"Save", "Remove", "Cancel"};
 		int btn_x = ed_x;
-		for (size_t i = 0; i < 4; i++) {
+		for (size_t i = 0; i < 3; i++) {
 			bool btn_sel = field_focus and pm_editor_field == 5 and pm_editor_button == static_cast<int>(i);
-			if (i == 3) {
-				if (btn_sel) out += theme("selected_bg") + theme("log_fault") + Fx::b;
-				else out += theme("log_fault");
-			} else if (btn_sel) {
+			if (btn_sel) {
 				out += theme("selected_bg") + theme("selected_fg") + Fx::b;
 			} else {
 				out += theme("main_fg");
