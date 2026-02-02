@@ -4844,6 +4844,11 @@ namespace Logs {
 	string color_modal_cmdline;
 	int color_modal_selected = 3;     //? Default to green (index 3)
 
+	//=== Toast Notification State ===
+	bool pm_toast_active = false;
+	uint64_t pm_toast_time = 0;
+	string pm_toast_message;
+
 	//? Get filter name based on current filter
 	//? Bitmask: Default=0x01, Info=0x02, Debug=0x04, Error=0x08, Fault=0x10
 	string get_filter_name() {
@@ -5202,6 +5207,12 @@ namespace Logs {
 	}
 
 	bool process_manager_input(const std::string_view key) {
+		if (pm_toast_active) {
+			pm_toast_active = false;
+			Input::mouse_mappings.erase("pm_toast_dismiss");
+			redraw = true;
+		}
+
 		const auto& processes = Config::logging.processes;
 		const int list_count = static_cast<int>(processes.size());
 
@@ -5520,6 +5531,9 @@ namespace Logs {
 						}
 						pm_edit_original_cmd = pm_edit_command;
 						pm_load_selected_config();
+						pm_toast_active = true;
+						pm_toast_time = Tools::time_ms();
+						pm_toast_message = "Saved!";
 						redraw = true;
 						Proc::redraw = true;
 					}
@@ -5600,6 +5614,9 @@ namespace Logs {
 					}
 					Config::save_process_config(cfg);
 					pm_load_selected_config();
+					pm_toast_active = true;
+					pm_toast_time = Tools::time_ms();
+					pm_toast_message = "Saved!";
 					redraw = true;
 					Proc::redraw = true;
 				}
@@ -5904,6 +5921,18 @@ namespace Logs {
 
 		out += Mv::to(modal_y + modal_h - 2, modal_x + 2);
 		out += theme("inactive_fg") + "Tab:Panel  ↑↓/PgUp/PgDn:Nav  n:New  Esc:Close";
+
+		if (pm_toast_active) {
+			if (Tools::time_ms() - pm_toast_time > 1000) {
+				pm_toast_active = false;
+			} else {
+				int toast_w = static_cast<int>(pm_toast_message.length()) + 4;
+				int toast_x = modal_x + (modal_w - toast_w) / 2;
+				int toast_y = modal_y + modal_h / 2;
+				out += Mv::to(toast_y, toast_x) + theme("hi_fg") + Fx::b + "[ " + pm_toast_message + " ]" + Fx::reset;
+				Input::mouse_mappings["pm_toast_dismiss"] = {toast_y, toast_x, 1, toast_w};
+			}
+		}
 
 		return out;
 	}
