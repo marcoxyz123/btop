@@ -5312,6 +5312,18 @@ namespace Logs {
 				redraw = true;
 				return false;
 			}
+			if (key == "page_down" and list_count > 0) {
+				pm_list_selected = std::min(pm_list_selected + 5, list_count - 1);
+				pm_load_selected_config();
+				redraw = true;
+				return false;
+			}
+			if (key == "page_up" and list_count > 0) {
+				pm_list_selected = std::max(pm_list_selected - 5, 0);
+				pm_load_selected_config();
+				redraw = true;
+				return false;
+			}
 			if (key.starts_with("pm_list_")) {
 				int idx = std::stoi(string(key.substr(8)));
 				if (idx >= 0 and idx < list_count) {
@@ -5330,6 +5342,16 @@ namespace Logs {
 			}
 			if (is_in(key, "up", "k", "shift_tab")) {
 				pm_editor_field = (pm_editor_field - 1 + 7) % 7;
+				redraw = true;
+				return false;
+			}
+			if (key == "page_down") {
+				pm_editor_field = std::min(pm_editor_field + 3, 6);
+				redraw = true;
+				return false;
+			}
+			if (key == "page_up") {
+				pm_editor_field = std::max(pm_editor_field - 3, 0);
 				redraw = true;
 				return false;
 			}
@@ -5858,7 +5880,7 @@ namespace Logs {
 		}
 
 		out += Mv::to(modal_y + modal_h - 2, modal_x + 2);
-		out += theme("inactive_fg") + "Tab:Switch  ↑↓:Nav  Enter:Edit  n:New  Esc:Close";
+		out += theme("inactive_fg") + "Tab:Panel  ↑↓/PgUp/PgDn:Nav  n:New  Esc:Close";
 
 		return out;
 	}
