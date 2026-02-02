@@ -551,6 +551,7 @@ lint:cppcheck:
         --suppress=useStlAlgorithm \
         --suppress=syntaxError \
         --suppress=memleakOnRealloc:src/linux/intel_gpu_top/intel_gpu_top.c \
+        --suppress=preprocessorErrorDirective:include/toml.hpp \
         --inline-suppr \
         --xml \
         --xml-version=2 \
@@ -567,6 +568,7 @@ lint:cppcheck:
         --suppress=useStlAlgorithm \
         --suppress=syntaxError \
         --suppress=memleakOnRealloc:src/linux/intel_gpu_top/intel_gpu_top.c \
+        --suppress=preprocessorErrorDirective:include/toml.hpp \
         --inline-suppr \
         -DGPU_SUPPORT \
         -I src/ \
