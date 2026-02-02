@@ -22,13 +22,99 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP(
     "mbtop",
     instructions="""
-    MCP server for mbtop process monitor. Use these tools to:
-    - Tag important processes with colors (Red, Orange, Yellow, Green, Violet, Blue)
-    - Give processes meaningful display names
-    - Filter mbtop to show only tagged processes
-    
-    mbtop auto-reloads config changes within ~2 seconds.
-    """,
+# mbtop MCP Server - AI Usage Guide
+
+Control mbtop process monitor: tag processes with colors, set display names, filter view, and control the Logs panel.
+
+## CRITICAL: Command Matching is EXACT
+
+The `command` parameter must **EXACTLY match** the full command line of the running process.
+This is NOT a substring or regex match - it's a character-for-character comparison.
+
+### Common Mistakes (WILL NOT WORK):
+- Using `"python"` when process is `"python3 /path/to/script.py"`
+- Using `"node server.js"` when process is `"node /full/path/to/server.js"`
+- Using `"npm start"` when the actual process is `"node /path/to/node_modules/.bin/..."`
+
+## MANDATORY WORKFLOW: How to Tag a Process
+
+### Step 1: Find the EXACT command line
+Run this command to find the exact command string:
+```bash
+ps -eo pid,comm,args | grep -i <process_name>
+```
+
+Example output:
+```
+12345 python3  python3 /Users/dev/myapp/server.py --port 8080
+67890 node     node /Users/dev/webapp/dist/server.js
+```
+
+The FULL content after the process name is what you need for `command`.
+
+### Step 2: Use the EXACT command string
+```
+tag_process(
+    name="python3",                                    # Process name (from 'comm' column)
+    command="python3 /Users/dev/myapp/server.py --port 8080",  # EXACT args string
+    color="green",
+    display_name="My App Server"
+)
+```
+
+### Step 3: Verify it worked
+Use `list_tagged_processes()` to confirm the tag was saved.
+mbtop auto-reloads config within ~2 seconds.
+
+## Available Colors (Nord Aurora)
+- **red**: Alerts, errors, critical processes
+- **orange**: Warnings, needs attention
+- **yellow**: Active work, in progress
+- **green**: Healthy, running normally
+- **violet**: Background, informational
+- **blue**: Secondary, calm
+
+## Tool Categories
+
+### Config-based (persisted, survives restart):
+- `tag_process()` - Tag with color and display name
+- `untag_process()` - Remove tag
+- `set_process_log()` - Set application log file path
+- `set_filter_tagged()` - Show only tagged processes
+- `list_tagged_processes()` - List all tagged
+- `get_mbtop_status()` - Config summary
+
+### Socket-based (real-time, requires mbtop running):
+- `show_logs_panel()` - Open Logs panel
+- `hide_logs_panel()` - Close Logs panel
+- `select_process()` - Select in process list
+- `set_log_level_filter()` - Filter by log level
+- `get_mbtop_live_state()` - Query current UI state
+
+## Quick Reference
+
+```bash
+# 1. Find exact command
+ps -eo pid,comm,args | grep python
+
+# 2. Tag it (use EXACT command from ps output)
+tag_process(name="python3", command="python3 /full/path/script.py", color="yellow")
+
+# 3. Optionally filter to show only tagged
+set_filter_tagged(true)
+```
+
+## Troubleshooting
+
+**Tag not appearing in mbtop?**
+1. Check `list_tagged_processes()` - is it saved?
+2. Verify command is EXACT match (copy-paste from `ps` output)
+3. Wait 2 seconds for mbtop to reload config
+
+**Socket commands failing?**
+1. Is mbtop running? Socket only works when mbtop is active
+2. Check `get_mbtop_live_state()` for connection test
+""",
 )
 
 # Nord Aurora + Frost color mapping
