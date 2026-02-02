@@ -42,6 +42,8 @@ namespace Socket {
 
 	string socket_path;
 	std::atomic<bool> running{false};
+	std::atomic<bool> mcp_unavailable{false};
+	string mcp_error_message;
 	std::atomic<bool> command_pending{false};
 	std::atomic<CommandType> pending_command{CommandType::None};
 	CommandParams params;
@@ -266,21 +268,40 @@ namespace Socket {
 		Logger::info("Socket: Listener stopped");
 	}
 
-	void start() {
-		if (running.load()) return;
+	Socket::StartResult start() {
+		if (running.load()) return Socket::StartResult::AlreadyRunning;
 
 		string path = get_socket_path();
 
-		// Remove existing socket file
+		//? Check if socket file exists and try to connect to detect stale socket
 		if (fs::exists(path)) {
-			fs::remove(path);
+			int test_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+			if (test_fd >= 0) {
+				struct sockaddr_un test_addr;
+				memset(&test_addr, 0, sizeof(test_addr));
+				test_addr.sun_family = AF_UNIX;
+				strncpy(test_addr.sun_path, path.c_str(), sizeof(test_addr.sun_path) - 1);
+
+				if (connect(test_fd, (struct sockaddr*)&test_addr, sizeof(test_addr)) == 0) {
+					//? Connection succeeded - another instance is running
+					close(test_fd);
+					Logger::warning("Socket: Already in use by another mbtop instance");
+					mcp_unavailable.store(true);
+					mcp_error_message = "MCP is already active in another\nmbtop instance.\n\nClose that instance first to enable\nMCP control in this terminal.";
+					return Socket::StartResult::InUseByOther;
+				}
+				close(test_fd);
+				//? Connection failed - stale socket file, remove it
+				Logger::info("Socket: Removing stale socket file");
+				fs::remove(path);
+			}
 		}
 
 		// Create socket
 		server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 		if (server_fd < 0) {
 			Logger::error("Socket: Failed to create socket: {}", strerror(errno));
-			return;
+			return Socket::StartResult::Failed;
 		}
 
 		// Set non-blocking (for clean shutdown)
@@ -294,10 +315,20 @@ namespace Socket {
 		strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
 
 		if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-			Logger::error("Socket: Failed to bind: {}", strerror(errno));
+			int bind_errno = errno;
 			close(server_fd);
 			server_fd = -1;
-			return;
+
+			if (bind_errno == EADDRINUSE) {
+				//? Socket file exists and is in use by another instance
+				Logger::warning("Socket: Already in use by another mbtop instance");
+				mcp_unavailable.store(true);
+				mcp_error_message = "MCP is already active in another\nmbtop instance.\n\nClose that instance first to enable\nMCP control in this terminal.";
+				return Socket::StartResult::InUseByOther;
+			}
+
+			Logger::error("Socket: Failed to bind: {}", strerror(bind_errno));
+			return Socket::StartResult::Failed;
 		}
 
 		// Listen
@@ -306,7 +337,7 @@ namespace Socket {
 			close(server_fd);
 			server_fd = -1;
 			fs::remove(path);
-			return;
+			return Socket::StartResult::Failed;
 		}
 
 		// Set permissions (owner only)
@@ -317,6 +348,7 @@ namespace Socket {
 		listener_thread = std::thread(listener_loop);
 
 		Logger::info("Socket: Server started on {}", path);
+		return Socket::StartResult::Success;
 	}
 
 	void stop() {

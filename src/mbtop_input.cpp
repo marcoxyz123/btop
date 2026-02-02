@@ -241,6 +241,13 @@ namespace Input {
 				Runner::run("all", true, true);
 				return;
 			}
+			//? Handle MCP unavailable error modal (any key closes it)
+			if (Proc::mcp_error_modal_active) {
+				Proc::mcp_error_modal_active = false;
+				Proc::redraw = true;
+				Runner::run("all", true, true);
+				return;
+			}
 
 			auto filtering = Config::getB("proc_filtering");
 			auto vim_keys = Config::getB("vim_keys");

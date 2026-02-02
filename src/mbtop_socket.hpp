@@ -31,6 +31,12 @@ namespace Socket {
 	//? Is the socket server running?
 	extern std::atomic<bool> running;
 
+	//? MCP unavailable flag (set when another instance has the socket)
+	extern std::atomic<bool> mcp_unavailable;
+
+	//? Error message to show user (set when mcp_unavailable)
+	extern std::string mcp_error_message;
+
 	//? Flag to signal main loop that a command needs processing
 	extern std::atomic<bool> command_pending;
 
@@ -64,8 +70,16 @@ namespace Socket {
 	extern std::string state_response;
 	extern std::atomic<bool> response_ready;
 
+	//? Socket start result
+	enum class StartResult {
+		Success,            //? Socket started successfully
+		AlreadyRunning,     //? This instance already has socket running
+		InUseByOther,       //? Another mbtop instance has the socket
+		Failed,             //? Other failure (permissions, etc.)
+	};
+
 	//? Initialize and start the socket server
-	void start();
+	StartResult start();
 
 	//? Stop the socket server and clean up
 	void stop();

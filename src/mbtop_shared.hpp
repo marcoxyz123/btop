@@ -474,6 +474,8 @@ namespace Proc {
 	extern string selected_name;
 	extern string selected_cmd;
 	extern bool filter_tagged;  //? When true, show only tagged processes
+	extern bool mcp_error_shown;  //? Track if MCP error modal was shown
+	extern bool mcp_error_modal_active;  //? Track if modal is waiting for key
 
 	//? Contains the valid sorting options for processes
 	const vector<string> sort_vector = {
