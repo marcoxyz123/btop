@@ -1583,11 +1583,19 @@ namespace Gpu {
 			out += box[index];
 
 			//? When ane_split is active (Apple Silicon, key "6"), force split mode: GPU top, ANE bottom
-			bool use_ane_split = ane_split and Shared::aneCoreCount > 0;
+			//? Require minimum 3 rows for split: 1 upper graph + 1 divider + 1 lower graph
+			bool use_ane_split = ane_split and Shared::aneCoreCount > 0 and b_height_vec[index] >= 3;
 			bool is_split = not single_graph or use_ane_split;
 
-			graph_up_height = is_split ? (b_height_vec[index] + 1) / 2 : b_height_vec[index];
-			int graph_low_height = is_split ? b_height_vec[index] - graph_up_height : 0;
+			int graph_low_height;
+			if (use_ane_split) {
+				//? Reserve 1 row for the "gpu ▲▼ ane" divider line between upper and lower graphs
+				graph_up_height = (b_height_vec[index] - 1) / 2;
+				graph_low_height = b_height_vec[index] - graph_up_height - 1;
+			} else {
+				graph_up_height = is_split ? (b_height_vec[index] + 1) / 2 : b_height_vec[index];
+				graph_low_height = is_split ? b_height_vec[index] - graph_up_height : 0;
+			}
 
 			if (gpu.supported_functions.gpu_utilization) {
 				graph_upper = Draw::Graph{x + width - b_width - 3, graph_up_height, "cpu", safeVal(gpu.gpu_percent, "gpu-totals"s), graph_symbol, false, true}; // TODO cpu -> gpu
@@ -1664,16 +1672,16 @@ namespace Gpu {
 			out += Fx::ub + Mv::to(y + rows_used, x + 1) + graph_upper(safeVal(gpu.gpu_percent, "gpu-totals"s), (data_same or redraw[index]));
 
 			//? Lower graph: ANE (when ane_split, key "6") or mirrored GPU (when gpu_mirror_graph)
-			if (ane_split and Shared::aneCoreCount > 0) {
+			if (ane_split and Shared::aneCoreCount > 0 and b_height_vec[index] >= 3) {
+				//? Draw mid-line divider first, then ANE graph below it
+				out += Mv::to(y + rows_used + graph_up_height, x) + Fx::ub + Theme::c("cpu_box") + Symbols::div_left + Theme::c("div_line")
+					+ Symbols::h_line * (width - b_width - 2) + Symbols::div_right
+					+ Mv::to(y + rows_used + graph_up_height, x + ((width - b_width) / 2) - 5)
+					+ Theme::c("main_fg") + "gpu" + Mv::r(1) + "▲▼" + Mv::r(1) + "ane";
 				auto& ane_data = Gpu::shared_gpu_percent.at("ane-activity");
 				if (not ane_data.empty()) {
-					out += Mv::to(y + rows_used + graph_up_height, x + 1) + ane_graph(ane_data, (data_same or redraw[index]));
+					out += Mv::to(y + rows_used + graph_up_height + 1, x + 1) + ane_graph(ane_data, (data_same or redraw[index]));
 				}
-				//? Draw mid-line with "gpu ▲▼ ane" label AFTER graphs (so it's not overwritten)
-				out += Mv::to(y + graph_up_height + 1, x) + Fx::ub + Theme::c("cpu_box") + Symbols::div_left + Theme::c("div_line")
-					+ Symbols::h_line * (width - b_width - 2) + Symbols::div_right
-					+ Mv::to(y + graph_up_height + 1, x + ((width - b_width) / 2) - 5)
-					+ Theme::c("main_fg") + "gpu" + Mv::r(1) + "▲▼" + Mv::r(1) + "ane";
 			} else if (not single_graph) {
 				out += Mv::to(y + rows_used + graph_up_height, x + 1) + graph_lower(safeVal(gpu.gpu_percent, "gpu-totals"s), (data_same or redraw[index]));
 			}
